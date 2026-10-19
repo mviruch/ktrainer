@@ -31,14 +31,14 @@ export function loadAccount(): Account {
   const saved = store.get<Partial<Account>>("fut-acc", {});
   const acc: Account = {
     wallet: FIXED.account,
-    lev: 20,
+    lev: 5,
     mode: "cross",
     busts: 0,
     runN: 0,
     ...saved,
   };
   if (!(acc.wallet >= 0)) acc.wallet = FIXED.account;
-  if (!(acc.lev >= 1 && acc.lev <= LEV_MAX)) acc.lev = 20;
+  if (!(acc.lev >= 1 && acc.lev <= LEV_MAX)) acc.lev = 5;
   if (acc.mode !== "isolated") acc.mode = "cross";
   acc.busts = acc.busts || 0;
   acc.runN = acc.runN || 0;
@@ -100,6 +100,7 @@ function packBars(bars: Bar[]): SavedBar[] {
 }
 
 export function saveRound(t: Round) {
+  if (t.done) return;
   store.set("fut-round", {
     v: 1,
     symbol: t.symbol,
@@ -259,6 +260,17 @@ export function saveInds(rows: IndInst[]) {
   store.set("fut-ind", rows);
 }
 
+/** True when this in-progress / restored round was already written to the session log. */
+export function findSettledRound(log: RoundLog[], t: Pick<Round, "startedAt" | "symbol" | "bars" | "ctx" | "cursor">): RoundLog | undefined {
+  const byStart = log.find((r) => r.startedAt != null && r.startedAt === t.startedAt);
+  if (byStart) return byStart;
+  // Legacy rows (pre-startedAt): same symbol + candle window.
+  const t0 = t.bars[t.ctx - 1]?.t;
+  const t1 = t.bars[t.cursor - 1]?.t;
+  if (t0 == null || t1 == null) return undefined;
+  return log.find((r) => r.startedAt == null && r.symbol === t.symbol && r.t0 === t0 && r.t1 === t1);
+}
+
 export function toLog(t: Round, reason: string): RoundLog {
   const pnl = t.wallet - t.startWallet;
   return {
@@ -277,6 +289,7 @@ export function toLog(t: Round, reason: string): RoundLog {
     peeked: !!t.peeked,
     t0: t.bars[t.ctx - 1].t,
     t1: t.bars[t.cursor - 1].t,
+    startedAt: t.startedAt,
     list: t.fills.slice(0, 80).map((f) => ({
       i: f.i - t.ctx + 1,
       side: f.side,

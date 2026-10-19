@@ -16,6 +16,7 @@ import {
 import { clearDeadHosts, drawSession, fetchMore } from "@/lib/market";
 import {
   clearRound,
+  findSettledRound,
   loadAccount,
   loadConfig,
   loadLog,
@@ -31,7 +32,7 @@ import {
   toLog,
 } from "@/lib/persist";
 import { store } from "@/lib/store";
-import { intervalList } from "@/lib/frames";
+import { activeView, bucketOpen, intervalList } from "@/lib/frames";
 import type { ActResult, Config, Drawing, Interval, MarginMode, OrderDraft, OrderTab, Phase, Round, RoundLog, RunLog } from "@/lib/types";
 
 export type DialogState =
@@ -41,6 +42,7 @@ export type DialogState =
   | { kind: "tpsl" }
   | { kind: "end" }
   | { kind: "peek" }
+  | { kind: "reverse" }
   | { kind: "speed" }
   | { kind: "wipe" }
   | { kind: "reset" }
@@ -70,6 +72,7 @@ export type Trainer = Box & {
   rev: number;
   start: () => void;
   step: () => void;
+  tick: () => void;
   togglePlay: () => void;
   setSpeed: (v: number) => void;
   requestEnd: () => void;
@@ -80,7 +83,8 @@ export type Trainer = Box & {
   next: () => void;
   place: (d: OrderDraft) => boolean;
   closePart: (f: number) => void;
-  reverse: () => void;
+  requestReverse: () => void;
+  confirmReverse: () => void;
   cancel: (id: number) => void;
   cancelAll: () => void;
   applyTpSl: (tp: number | null, sl: number | null) => void;
@@ -194,30 +198,47 @@ function createApi(box: { current: Box }, bump: () => void) {
     return run;
   }
 
+  function cancelSave() {
+    window.clearTimeout(saveTimer);
+    saveTimer = 0;
+  }
+
   function endRound(reason: string) {
     const t = box.current.round;
     if (!t || t.done) return;
+    // Stop any debounced autosave so a stale write cannot resurrect this round after clearRound.
+    cancelSave();
     box.current.playing = false;
     flatten(t, box.current.acc.lev, box.current.acc.mode, "结束");
     t.orders = [];
     t.done = true;
-    const rec = toLog(t, reason);
-    box.current.log = [...box.current.log, rec].slice(-600);
-    saveLog(box.current.log);
-    box.current.acc.wallet = t.wallet;
-    let bust = false;
-    if (box.current.acc.wallet < 1) {
-      bust = true;
-      box.current.acc.busts += 1;
-      box.current.acc.wallet = FIXED.account;
-    }
-    box.current.acc.runN += 1;
-    saveAccount(box.current.acc);
+    // Drop in-progress draft immediately — refresh must not restore an open position from an ended round.
     clearRound();
+
+    const prior = findSettledRound(box.current.log, t);
+    let rec: RoundLog;
+    let bust = false;
+    if (prior) {
+      // Idempotent: same startedAt already contributed to session/account stats.
+      rec = prior;
+    } else {
+      rec = toLog(t, reason);
+      box.current.log = [...box.current.log, rec].slice(-600);
+      saveLog(box.current.log);
+      box.current.acc.wallet = t.wallet;
+      if (box.current.acc.wallet < 1) {
+        bust = true;
+        box.current.acc.busts += 1;
+        box.current.acc.wallet = FIXED.account;
+      }
+      box.current.acc.runN += 1;
+      saveAccount(box.current.acc);
+    }
+
     box.current.result = { rec, bust };
     box.current.phase = "result";
     box.current.dialog = null;
-    const run = box.current.acc.runN >= FIXED.runSize ? closeRun() : null;
+    const run = !prior && box.current.acc.runN >= FIXED.runSize ? closeRun() : null;
     bump();
     if (run) {
       window.setTimeout(() => {
@@ -247,7 +268,8 @@ function createApi(box: { current: Box }, bump: () => void) {
     bump();
   }
 
-  function step() {
+  /* 播放用：每次走一根基础周期 K 线。 */
+  function tick() {
     const t = box.current.round;
     if (!t || t.done || box.current.phase !== "trade") return;
     if (t.cursor >= t.bars.length) {
@@ -261,6 +283,44 @@ function createApi(box: { current: Box }, bump: () => void) {
       endRound("爆仓");
       return;
     }
+    if (toasts.length) toastMsg(toasts[toasts.length - 1], 3500);
+    else bump();
+  }
+
+  /* 「下一根」：按当前看的周期走一整根。视图是 1H、基础是 5m 时，一次走到下一个 1H 收盘；
+     中途逐根撮合，爆仓/成交提示照常，K 线不够就去续拉并停在这里。 */
+  function step() {
+    const t = box.current.round;
+    if (!t || t.done || box.current.phase !== "trade") return;
+    const view = activeView(t);
+    const baseMs = IV_MS[t.interval] || 36e5;
+    const viewMs = IV_MS[view] || baseMs;
+    if (view === t.interval || viewMs <= baseMs) {
+      tick();
+      return;
+    }
+    const toasts: string[] = [];
+    let moved = 0;
+    while (true) {
+      if (t.cursor >= t.bars.length) {
+        if (moved) saveSoon(false);
+        if (toasts.length) toastMsg(toasts[toasts.length - 1], 3500);
+        void pullMore(t);
+        return;
+      }
+      const r = advance(t, box.current.acc.lev, box.current.acc.mode);
+      moved++;
+      toasts.push(...r.toasts);
+      if (t.bust) {
+        saveSoon(false);
+        if (toasts.length) toastMsg(toasts[toasts.length - 1], 4000);
+        endRound("爆仓");
+        return;
+      }
+      const now = t.bars[t.cursor - 1].t + baseMs;
+      if (bucketOpen(now, viewMs) === now || moved > 5000) break;
+    }
+    saveSoon(false);
     if (toasts.length) toastMsg(toasts[toasts.length - 1], 3500);
     else bump();
   }
@@ -325,6 +385,7 @@ function createApi(box: { current: Box }, bump: () => void) {
   return {
     start: () => void start(),
     step,
+    tick,
     togglePlay() {
       const t = box.current.round;
       if (!t || t.done || box.current.phase !== "trade") return;
@@ -358,6 +419,7 @@ function createApi(box: { current: Box }, bump: () => void) {
         return;
       }
       box.current.playing = false;
+      cancelSave();
       clearRound();
       void start();
     },
@@ -402,12 +464,24 @@ function createApi(box: { current: Box }, bump: () => void) {
       saveSoon(true);
       bump();
     },
-    reverse() {
+    requestReverse() {
       const t = box.current.round;
-      if (!t) return;
+      if (!t || !t.pos) return;
+      box.current.playing = false;
+      box.current.dialog = { kind: "reverse" };
+      bump();
+    },
+    confirmReverse() {
+      const t = box.current.round;
+      box.current.dialog = null;
+      if (!t) {
+        bump();
+        return;
+      }
       const res = reversePos(t, box.current.acc.lev, box.current.acc.mode);
       if (!res.ok) {
         toastMsg(res.error);
+        bump();
         return;
       }
       saveSoon(true);
@@ -573,9 +647,15 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
       store.booted = true;
       const saved = loadRound();
       if (saved) {
-        store.holder.current.round = saved;
-        store.holder.current.phase = "trade";
-        store.api.toastMsg("接着上次没打完的那一局", 2600);
+        // Ended rounds must never resume with a live position; wipe dirty draft if already settled.
+        if (findSettledRound(store.holder.current.log, saved)) {
+          clearRound();
+          if (store.holder.current.log.length) store.api.start();
+        } else {
+          store.holder.current.round = saved;
+          store.holder.current.phase = "trade";
+          store.api.toastMsg("接着上次没打完的那一局", 2600);
+        }
       } else if (store.holder.current.log.length) store.api.start();
     }
     const onLeave = () => {
@@ -589,7 +669,7 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
   const s = store.holder.current;
   useEffect(() => {
     if (!s.playing) return;
-    const timer = window.setInterval(() => store.api.step(), Math.round(s.speed * 1000));
+    const timer = window.setInterval(() => store.api.tick(), Math.round(s.speed * 1000));
     return () => window.clearInterval(timer);
   }, [s.playing, s.speed, store]);
 

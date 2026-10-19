@@ -1,35 +1,36 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-ink: #f5f3ee;
-  --color-panel: #ffffff;
-  --color-raise: #f0ede6;
-  --color-line: #e0dbd0;
-  --color-chalk: #1d2731;
-  --color-dim: #5e6975;
-  --color-faint: #98a0a9;
-  --color-up: #1e9468;
-  --color-down: #cc4444;
+  /* TradingView-dark shell — matches #131722 chart */
+  --color-ink: #131722;
+  --color-panel: #1a1a22;
+  --color-raise: #2A2E39;
+  --color-line: #2A2E39;
+  --color-chalk: #D1D4DC;
+  --color-dim: #787B86;
+  --color-faint: #5d606b;
+  --color-up: #37a74c;
+  --color-down: #cf4f5f;
   --color-verdict: #b7800f;
-  --color-breach: #b4514f;
-  --color-background: #f5f3ee;
-  --color-foreground: #1d2731;
-  --color-card: #ffffff;
-  --color-card-foreground: #1d2731;
+  --color-breach: #ef5350;
+  --color-background: #131722;
+  --color-foreground: #D1D4DC;
+  --color-card: #1a1a22;
+  --color-card-foreground: #D1D4DC;
   --color-primary: #b7800f;
   --color-primary-foreground: #ffffff;
-  --color-secondary: #f0ede6;
-  --color-secondary-foreground: #1d2731;
-  --color-muted: #f0ede6;
-  --color-muted-foreground: #5e6975;
-  --color-accent: #f0ede6;
-  --color-accent-foreground: #1d2731;
-  --color-destructive: #cc4444;
-  --color-border: #e0dbd0;
-  --color-input: #e0dbd0;
+  --color-secondary: #2A2E39;
+  --color-secondary-foreground: #D1D4DC;
+  --color-muted: #2A2E39;
+  --color-muted-foreground: #787B86;
+  --color-accent: #2A2E39;
+  --color-accent-foreground: #D1D4DC;
+  --color-destructive: #ef5350;
+  --color-border: #2A2E39;
+  --color-input: #2A2E39;
   --color-ring: #b7800f;
-  --color-popover: #ffffff;
-  --color-popover-foreground: #1d2731;
+  --color-popover: #1a1a22;
+  --color-popover-foreground: #D1D4DC;
   --radius-sm: 3px;
   --radius-md: 4px;
   --radius-lg: 6px;
@@ -38,20 +39,20 @@
 }
 
 :root {
-  --ink: #f5f3ee;
-  --panel: #ffffff;
-  --raise: #f0ede6;
-  --line: #e0dbd0;
-  --chalk: #1d2731;
-  --dim: #5e6975;
-  --faint: #98a0a9;
-  --up: #1e9468;
-  --down: #cc4444;
+  --ink: #131722;
+  --panel: #1a1a22;
+  --raise: #2A2E39;
+  --line: #2A2E39;
+  --chalk: #D1D4DC;
+  --dim: #787B86;
+  --faint: #5d606b;
+  --up: #37a74c;
+  --down: #cf4f5f;
   --verdict: #b7800f;
-  --breach: #b4514f;
+  --breach: #ef5350;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -69,6 +70,9 @@ body {
 #root { width: auto; max-width: none; margin: 0; text-align: left; border: 0; min-height: 0; display: block; }
 button, input, select { font-family: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--verdict); outline-offset: 2px; }
+select, option { background: var(--panel); color: var(--chalk); }
+/* Emphasized solid controls on dark chrome (pause / close-all): light fill, dark ink */
+.btn-solid { border-color: var(--chalk) !important; background: var(--chalk) !important; color: var(--ink) !important; }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 #app { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; height: 100dvh; min-height: 0; }
@@ -93,7 +97,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 #main { display: grid; grid-template-columns: minmax(0, 1fr) 344px; min-height: 0; overflow: hidden; }
 #stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; position: relative; }
 #chartwrap { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-#chartbody { flex: 1; position: relative; min-height: 0; }
+#chartbody { flex: 1; position: relative; min-height: 0; background: #131722; }
 #chartbar {
   position: relative; z-index: 5; flex-shrink: 0;
   display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 10px 0 6px;
@@ -115,7 +119,12 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   background: transparent; border: none; border-radius: 4px; padding: 3px 8px; cursor: pointer;
 }
 #tfs button:hover { background: var(--raise); color: var(--chalk); }
-#tfs button.on { background: var(--raise); color: var(--chalk); }
+#tfs button.on {
+  background: #363a45;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--verdict);
+}
 #indwrap { position: relative; flex-shrink: 0; }
 #indbtn {
   display: flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px;
@@ -123,16 +132,19 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 }
 #indbtn:hover, #indbtn.on { background: var(--raise); color: var(--chalk); }
 #indwin {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 2;
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
   width: 440px; max-height: min(480px, calc(100vh - 180px));
   display: flex; flex-direction: column;
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-  box-shadow: 0 12px 40px rgba(29, 39, 49, 0.12); overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55); overflow: hidden;
+  color: var(--chalk); color-scheme: dark;
 }
 #indwin > input {
   margin: 10px 10px 0; height: 32px; border: 1px solid var(--line); border-radius: 4px;
   background: var(--ink); padding: 0 10px; font-size: 13px; color: var(--chalk);
+  outline: none; color-scheme: dark;
 }
+#indwin > input::placeholder { color: var(--faint); }
 #indwin .body { display: grid; grid-template-columns: 88px minmax(0, 1fr); min-height: 0; flex: 1; margin-top: 8px; }
 #indwin nav { border-right: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
 #indwin nav button {
@@ -175,7 +187,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 2;
   min-width: 176px; padding: 8px 10px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(29, 39, 49, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   display: flex; flex-direction: column; gap: 6px;
 }
 .legset label { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--dim); }
@@ -184,9 +196,20 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   font-family: var(--mono); font-size: 12px; text-align: center; color: var(--chalk);
 }
 #chartnote {
-  margin-left: auto; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; color: var(--faint); letter-spacing: 0.04em; padding-left: 12px;
+  margin-left: auto; flex: 1 1 0; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: var(--faint); letter-spacing: 0.02em; padding-left: 12px;
 }
+/* Off-scale liq / far price: small chevron on chart edge instead of a stacked axis label */
+.price-edge-note {
+  position: absolute; right: 56px; z-index: 3; pointer-events: none;
+  display: flex; align-items: center; gap: 4px;
+  font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--ink) 88%, transparent);
+  border: 1px solid var(--line); border-radius: 3px; padding: 2px 7px 2px 6px;
+}
+.price-edge-note.top { top: 8px; }
+.price-edge-note.bot { bottom: 24%; }
 #drawhint {
   position: absolute; left: 34px; top: 4px; white-space: nowrap;
   font-size: 11px; color: var(--dim); background: var(--panel); border: 1px solid var(--line);
@@ -209,12 +232,18 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .row span { color: var(--dim); }
 .row b { font-family: var(--mono); font-weight: 500; font-variant-numeric: tabular-nums; text-align: right; }
 .settle-hd { font-family: var(--mono); font-size: 26px; letter-spacing: -0.01em; margin-bottom: 2px; }
-.reveal { font-size: 12px; color: var(--dim); margin-bottom: 16px; font-family: var(--mono); }
+.reveal {
+  font-size: 12px; color: var(--dim); margin-bottom: 16px; font-family: var(--mono);
+  white-space: normal; line-height: 1.45; overflow-wrap: anywhere; word-break: keep-all;
+}
+.reveal-date { display: block; }
+.reveal-range { white-space: nowrap; }
+.reveal-tz { white-space: nowrap; }
 
 #empty {
   position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 20px;
-  background: color-mix(in srgb, var(--ink) 88%, transparent);
+  background: color-mix(in srgb, var(--ink) 92%, transparent);
 }
 #empty p { color: var(--dim); font-size: 13px; max-width: 42ch; line-height: 1.6; }
 #empty pre {

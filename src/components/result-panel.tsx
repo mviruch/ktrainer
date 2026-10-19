@@ -48,8 +48,12 @@ export function ResultPanel() {
       <div className="reveal">
         {r.fills ? `${pctFmt(r.pnl / r.startW)} · 余额 ${uFmt(r.endW)} U` : `这一局没有交易 · 余额 ${uFmt(r.endW)} U`}
       </div>
-      <div className="reveal" style={{ color: "var(--chalk)" }}>
-        {r.symbol} · {intervalLabel(r.interval)} · {bjDate(r.t0)} → {bjDate(r.t1)}（北京时间）
+      <div className="reveal reveal-date" style={{ color: "var(--chalk)" }}>
+        标的已隐藏 · {intervalLabel(r.interval)} ·{" "}
+        <span className="reveal-range">
+          {bjDate(r.t0)} → {bjDate(r.t1)}
+          <span className="reveal-tz">（北京时间）</span>
+        </span>
       </div>
       {t.result?.bust && <div className="rs-bust">账户爆仓了。余额已经重新给到 10,000 U，爆仓次数记在统计里。</div>}
       <div className="plan">

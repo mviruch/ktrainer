@@ -139,6 +139,7 @@ export function TradePanel() {
         </Button>
       </div>
       <div className="tr-under">
+        <div className="col-span-2 text-[11px] text-dim">本单预估</div>
         <div>
           可开多 <b>{uFmt(maxOpen(round, 1, t.acc.lev), 0)}</b> U
         </div>
@@ -161,7 +162,7 @@ export function TradePanel() {
         <Position
           onEdit={() => t.openDialog({ kind: "tpsl" })}
           onClose={(f) => t.closePart(f)}
-          onReverse={t.reverse}
+          onReverse={t.requestReverse}
         />
       )}
 
@@ -274,7 +275,7 @@ function Position({ onEdit, onClose, onReverse }: { onEdit: () => void; onClose:
         <Button size="sm" onClick={() => onClose(0.5)}>
           平 50%
         </Button>
-        <Button size="sm" className="!border-chalk !bg-chalk !text-white" onClick={() => onClose(1)}>
+        <Button size="sm" className="btn-solid" onClick={() => onClose(1)}>
           市价全平
         </Button>
         <Button size="sm" onClick={onReverse}>

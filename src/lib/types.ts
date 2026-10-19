@@ -119,6 +119,8 @@ export type RoundLog = {
   peeked: boolean;
   t0: number;
   t1: number;
+  /** Round start time; used to settle each round at most once. */
+  startedAt?: number;
   list: FillRec[];
 };
 

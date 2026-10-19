@@ -21,6 +21,8 @@ export type LinePoint = {
   color: string;
   title: string;
   style: "solid" | "dashed" | "dotted";
+  /** Show price on the right axis. Prefer one label (entry); others use title only. */
+  axisLabel?: boolean;
 };
 
 export type MarkPoint = { time: number; side: Side; color: string };
@@ -30,12 +32,14 @@ export type ChartModel = {
   volume: VolumePoint[];
   lines: LinePoint[];
   marks: MarkPoint[];
+  /** Unix sec of the live cursor candle (last non-peeked bar); null if none. */
+  nowTime: number | null;
   blind: boolean;
   live: boolean;
 };
 
-const UP = "#1E9468";
-const DOWN = "#CC4444";
+const UP = "#37a74c";
+const DOWN = "#cf4f5f";
 
 function rgba(hex: string, a: number) {
   const n = parseInt(hex.slice(1), 16);
@@ -73,7 +77,7 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
     volume.push({
       time,
       value: blind ? b.v / avg : b.v,
-      color: rgba(rise ? up : down, faded ? 0.28 : 0.55),
+      color: rgba(rise ? up : down, faded ? 0.05 : 0.32),
       faded,
     });
   }
@@ -84,14 +88,16 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
     lines.push({
       id: "avg",
       price: px(P.entry),
-      color: "#6B7785",
+      color: "#787B86",
       title: P.side > 0 ? "多" : "空",
       style: "solid",
+      axisLabel: true,
     });
     const lq = liqPrice(round);
-    if (lq) lines.push({ id: "liq", price: px(lq), color: "#D07A2E", title: "强平", style: "dashed" });
-    if (P.tp) lines.push({ id: "tp", price: px(P.tp), color: up, title: "止盈", style: "dashed" });
-    if (P.sl) lines.push({ id: "sl", price: px(P.sl), color: down, title: "止损", style: "dashed" });
+    // No axis label — far liq stacks / vanishes; chart hides off-range and shows an edge note.
+    if (lq) lines.push({ id: "liq", price: px(lq), color: "#D07A2E", title: "强", style: "dashed", axisLabel: false });
+    if (P.tp) lines.push({ id: "tp", price: px(P.tp), color: up, title: "盈", style: "dashed", axisLabel: false });
+    if (P.sl) lines.push({ id: "sl", price: px(P.sl), color: down, title: "损", style: "dashed", axisLabel: false });
   }
   if (!round.done) {
     for (const o of round.orders) {
@@ -99,8 +105,9 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
         id: "o" + o.id,
         price: px(o.price),
         color: o.side > 0 ? "#2F86C0" : "#9B51E0",
-        title: o.side > 0 ? "限价买" : "限价卖",
+        title: o.side > 0 ? "买" : "卖",
         style: "dotted",
+        axisLabel: false,
       });
     }
   }
@@ -113,5 +120,13 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
     if (!times.has(time)) continue;
     marks.push({ time, side: f.side, color: f.side > 0 ? up : down });
   }
-  return { candles, volume, lines, marks, blind, live: !round.done };
+  // Live cursor candle = last non-faded bar (played end / peek divider).
+  let nowTime: number | null = null;
+  for (let i = candles.length - 1; i >= 0; i--) {
+    if (!candles[i].faded) {
+      nowTime = candles[i].time;
+      break;
+    }
+  }
+  return { candles, volume, lines, marks, nowTime, blind, live: !round.done };
 }

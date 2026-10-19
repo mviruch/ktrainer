@@ -10,7 +10,7 @@ export function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) {
 export function DialogContent({ className, children, ...props }: ComponentProps<typeof DialogPrimitive.Content>) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-chalk/45" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60" />
       <DialogPrimitive.Content
         className={cn(
           "fixed left-1/2 top-1/2 z-40 max-h-[86vh] w-[min(620px,calc(100%-32px))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[6px] border border-line bg-panel p-6 text-chalk shadow-none",

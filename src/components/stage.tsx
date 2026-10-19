@@ -21,17 +21,25 @@ export function Transport() {
   const t = useTrainer();
   const on = t.phase === "trade";
   const opts = SPEED_OPTS.includes(t.speed) ? SPEED_OPTS : [...SPEED_OPTS, t.speed].sort((a, b) => a - b);
+  const baseIv = t.round?.interval ?? null;
+  const viewIv = t.round ? activeView(t.round) : null;
   const n = t.round ? t.round.cursor - t.round.ctx : 0;
+  const barLabel = (() => {
+    if (!baseIv) return "";
+    const base = IV_CN[baseIv];
+    if (viewIv && viewIv !== baseIv) return `第 ${n} 根 · ${base}视图切到 ${IV_CN[viewIv]}`;
+    return `第 ${n} 根 · ${base}`;
+  })();
   const count = !t.round
     ? ""
     : t.round.extending
       ? "正在往后续拉行情…"
       : t.round.done
         ? `本局走了 ${n} 根`
-        : `第 ${n} 根${t.round ? " " + IV_CN[t.round.interval] : ""} · ${speedLabel(t.speed)}${t.playing ? " · 播放中" : ""}`;
+        : `${barLabel} · ${speedLabel(t.speed)}${t.playing ? " · 播放中" : ""}`;
   return (
     <div id="transport">
-      <Button variant="primary" disabled={!on} className={t.playing ? "!border-chalk !bg-chalk !text-white" : ""} onClick={t.togglePlay}>
+      <Button variant="primary" disabled={!on} className={t.playing ? "btn-solid" : ""} onClick={t.togglePlay}>
         {t.playing ? "❚❚ 暂停" : "▶ 播放"}
         <span className="key">Space</span>
       </Button>
@@ -149,8 +157,8 @@ export function Stage() {
   const note = !round
     ? "标的与时间已屏蔽"
     : round.done
-      ? `${round.symbol} · 已揭盲`
-      : "标的、时间与价格轴已屏蔽 · 纵轴 = 开局那根收盘 100";
+      ? "已揭盲 · 标的仍隐藏"
+      : "标的/时间/价格已屏蔽 · 纵轴=开局收盘 100";
   const intervals = round ? intervalList(round) : IV_OK.filter((iv) => t.cfg.intervals.split(",").includes(iv));
   const commitInds = (next: IndInst[]) => {
     setInds(next);

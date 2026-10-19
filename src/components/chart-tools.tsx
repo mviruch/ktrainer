@@ -108,7 +108,7 @@ export function ChartBar({
         </button>
         {open ? <IndWindow inds={inds} error={indError} onAdd={onAdd} /> : null}
       </div>
-      <span id="chartnote">{note}</span>
+      <span id="chartnote" title={note}>{note}</span>
     </div>
   );
 }

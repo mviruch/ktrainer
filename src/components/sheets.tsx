@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { FEE_TAKER, FIXED, IV_CN, IV_OK, LEV_CHIPS, LEV_MAX, POOLS, SPEED_MAX, SPEED_MIN } from "@/lib/constants";
-import { availBal, priceNow } from "@/lib/engine";
+import { availBal, opp, priceNow, slipPx, uPnl } from "@/lib/engine";
 import { bjDate, fmtPrice, parsePrice, sgnU, uFmt } from "@/lib/format";
 import { download, statsOf } from "@/lib/stats";
 import { store } from "@/lib/store";
@@ -48,7 +48,7 @@ function StatsBody({ onClose }: { onClose: () => void }) {
     const lines = [cols.join(",")].concat(
       t.log.map((r) =>
         cols
-          .map((c) => q(c === "ts" ? new Date(r.ts).toISOString() : c === "t0" || c === "t1" ? bjDate(r[c]) : r[c]))
+          .map((c) => q(c === "symbol" ? "HIDDEN" : c === "ts" ? new Date(r.ts).toISOString() : c === "t0" || c === "t1" ? bjDate(r[c]) : r[c]))
           .join(","),
       ),
     );
@@ -221,6 +221,42 @@ function HelpBody({ onClose }: { onClose: () => void }) {
   );
 }
 
+
+function ReverseSheet() {
+  const t = useTrainer();
+  const d = t.dialog;
+  const round = t.round;
+  const P = round?.pos;
+  const open = d?.kind === "reverse";
+  let feeEst = "—";
+  let sideLabel = "";
+  if (open && round && P) {
+    const side = opp(P.side);
+    const fill = slipPx(round, side, priceNow(round));
+    feeEst = uFmt(P.qty * 2 * fill * FEE_TAKER) + " U";
+    sideLabel = P.side > 0 ? "多 → 空" : "空 → 多";
+  }
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && t.closeDialog()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>确认反手？</DialogTitle>
+          <DialogDescription asChild>
+            <div>
+              <div>将市价平掉当前仓位并开同等大小反向仓（{sideLabel || "反向"}）。</div>
+              <div>吃单万 5，带滑点；预估手续费约 <b className="num">{feeEst}</b>（平仓 + 开仓）。</div>
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="primary" onClick={t.confirmReverse}>确认反手</Button>
+          <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ActionSheets() {
   const t = useTrainer();
   const d = t.dialog;
@@ -233,9 +269,30 @@ export function ActionSheets() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>结束本局？</DialogTitle>
-            <DialogDescription>
-              {t.round?.pos ? "持仓会按市价平掉（吃单万 5，带滑点）。" : ""}
-              {t.round?.orders.length ? "挂单会全部撤销。" : ""}
+            <DialogDescription asChild>
+              <div>
+                {t.round?.pos ? (
+                  <>
+                    <div>
+                      当前未实现盈亏{" "}
+                      <b
+                        className="num"
+                        style={{
+                          color:
+                            uPnl(t.round, priceNow(t.round)) >= 0 ? "var(--up)" : "var(--down)",
+                        }}
+                      >
+                        {sgnU(uPnl(t.round, priceNow(t.round)))} U
+                      </b>
+                      。
+                    </div>
+                    <div>持仓会按市价平掉（吃单万 5，带滑点）。</div>
+                  </>
+                ) : (
+                  <div>当前没有持仓。</div>
+                )}
+                {t.round?.orders.length ? <div>挂单会全部撤销。</div> : null}
+              </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -258,6 +315,7 @@ export function ActionSheets() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ReverseSheet />
       <SpeedSheet />
       <Dialog open={d?.kind === "wipe"} onOpenChange={(o) => !o && t.closeDialog()}>
         <DialogContent>
