@@ -6,11 +6,11 @@ import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { buildChartModel } from "@/lib/chart-model";
-import { ChartBar, ChartTools, type Ohlc, type Tool } from "@/components/chart-tools";
+import { ChartBar, ChartTools, type IndReadout, type Ohlc, type Tool } from "@/components/chart-tools";
 import { PaneLegend } from "@/components/ind-window";
 import { activeView, chartSlice, intervalList } from "@/lib/frames";
 import { blindBaseOf } from "@/lib/format";
-import { computeIndicators, defaultParams, defaultStyle, defOf, instPane, styleOf, type IndInst, type IndKind, type PaneBox, type Plot } from "@/lib/indicators";
+import { computeIndicators, defaultParams, defaultStyle, defOf, indColor, indTitle, instPane, plotValueAt, slotLabel, styleOf, type IndInst, type IndKind, type PaneBox, type Plot } from "@/lib/indicators";
 import { loadInds, saveInds } from "@/lib/persist";
 import { DEFAULT_CHANNEL_STYLE, type Anchor, type Drawing, type DrawStyle } from "@/lib/types";
 import { canSkip } from "@/lib/engine";
@@ -127,6 +127,8 @@ export function Stage() {
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
   const [hover, setHover] = useState<Anchor | null>(null);
+  /** Candle time under crosshair; null → header falls back to latest live bar. */
+  const [hoverBarTime, setHoverBarTime] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [styleId, setStyleId] = useState<number | null>(null);
   const [inds, setInds] = useState<IndInst[]>(loadInds);
@@ -141,6 +143,7 @@ export function Stage() {
     setEpoch(started);
     setTool("cursor");
     setPending(null);
+    setHoverBarTime(null);
     setSelectedId(null);
     setStyleId(null);
     setPlots([]);
@@ -220,10 +223,46 @@ export function Stage() {
     const live = model.candles.filter((c) => !c.faded);
     const last = live.at(-1);
     if (!last) return null;
+    const hovered = hoverBarTime != null ? model.candles.find((c) => c.time === hoverBarTime) : undefined;
+    const bar = hovered ?? last;
     const vols = model.volume.filter((v) => !v.faded).map((v) => v.value);
     const avg = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
-    const lv = vols.at(-1);
-    return { o: last.open, h: last.high, l: last.low, c: last.close, vol: avg > 0 && lv != null ? lv / avg : null };
+    const volPt = model.volume.find((v) => v.time === bar.time);
+    const hasVolInd = inds.some((i) => i.kind === "VOL" && !styleOf(i).hidden);
+    return {
+      o: bar.open,
+      h: bar.high,
+      l: bar.low,
+      c: bar.close,
+      // Avoid twin Vol when VOL sub-pane readout already shows it.
+      vol: hasVolInd ? null : avg > 0 && volPt != null ? volPt.value / avg : null,
+    };
+  })();
+  const indReadout: IndReadout[] = (() => {
+    const rows: IndReadout[] = [];
+    for (const inst of inds) {
+      const st = styleOf(inst);
+      if (st.hidden) continue;
+      const def = defOf(inst.kind);
+      if (!def) continue;
+      const parts: IndReadout["parts"] = [];
+      for (const plot of plots) {
+        if (plot.inst !== inst.id || plot.visible === false || plot.id.endsWith(":zero")) continue;
+        const slot = plot.id.slice(String(inst.id).length + 1);
+        const value = plotValueAt(plot, hoverBarTime);
+        if (value == null || !Number.isFinite(value)) continue;
+        const d = Math.abs(value) >= 10 ? 2 : 4;
+        parts.push({
+          key: slot,
+          label: slotLabel(inst.kind, slot),
+          text: inst.kind === "VOL" && model?.blind ? value.toFixed(2) + "×" : value.toFixed(d),
+          color: plot.color,
+        });
+      }
+      if (!parts.length) continue;
+      rows.push({ id: inst.id, title: indTitle(inst), color: indColor(inst), parts });
+    }
+    return rows;
   })();
   const note = !round
     ? "标的与时间已屏蔽"
@@ -272,6 +311,7 @@ export function Stage() {
           inds={inds}
           indError={indError}
           ohlc={ohlc}
+          indReadout={indReadout}
           blind={!!round && !round.done}
           onView={t.setView}
           onAdd={addInd}
@@ -352,6 +392,7 @@ export function Stage() {
             }
             setHover(anchor);
           }}
+          onHoverBar={(time) => setHoverBarTime((prev) => (prev === time ? prev : time))}
           onSelect={(id) => setSelectedId(id)}
           onUpdateDrawing={(d) => t.updateDrawing(d)}
           onOpenStyle={(id) => {
@@ -364,6 +405,7 @@ export function Stage() {
           boxes={boxes}
           inds={inds}
           plots={plots}
+          hoverTime={hoverBarTime}
           onChange={(id, key, value) => commitInds(inds.map((inst) => (inst.id === id ? { ...inst, params: { ...inst.params, [key]: value } } : inst)))}
           onRemove={(id) => commitInds(inds.filter((inst) => inst.id !== id))}
           maxPane={maxPane}

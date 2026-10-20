@@ -10,9 +10,10 @@ export const FIXED = {
   yearsBack: 6,
 } as const;
 
-export const IV_OK: Interval[] = ["15m", "1h", "4h", "1d"];
+export const IV_OK: Interval[] = ["5m", "15m", "1h", "4h", "1d"];
 
 export const IV_CN: Record<Interval, string> = {
+  "5m": "5分钟",
   "15m": "15分钟",
   "1h": "1小时",
   "4h": "4小时",

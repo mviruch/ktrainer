@@ -15,7 +15,8 @@ export type IndKind =
   | "WILLR"
   | "ATR"
   | "OBV"
-  | "MFI";
+  | "MFI"
+  | "VOL";
 
 export type IndGroup = "trend" | "osc" | "volty" | "volume";
 
@@ -134,6 +135,7 @@ export const IND_CATALOG: IndDef[] = [
   { kind: "MOM", name: "动量", en: "MOM", group: "osc", where: "sub", alias: "momentum", fields: [f("period", "长度", 10, 1, 200)] },
   { kind: "WILLR", name: "威廉指标", en: "W%R", group: "osc", where: "sub", alias: "williams 威廉", fields: [f("period", "长度", 14, 2, 200)] },
   { kind: "ATR", name: "平均真实波幅", en: "ATR", group: "volty", where: "sub", alias: "波幅", fields: [f("period", "长度", 14, 1, 200)] },
+  { kind: "VOL", name: "成交量", en: "VOL", group: "volume", where: "sub", alias: "volume 量 成交量", fields: [] },
   { kind: "OBV", name: "能量潮", en: "OBV", group: "volume", where: "sub", alias: "能量", fields: [] },
   { kind: "MFI", name: "资金流量", en: "MFI", group: "volume", where: "sub", alias: "资金", fields: [f("period", "长度", 14, 2, 200)] },
 ];
@@ -145,6 +147,7 @@ export const HIST_DOWN = "#CC4444";
 export const HIST_NEUTRAL = "#8A939D";
 
 export function lineSlots(kind: IndKind): { key: string; label: string }[] {
+  if (kind === "VOL") return [];
   if (kind === "BBANDS") return [{ key: "up", label: "上轨" }, { key: "mid", label: "中轨" }, { key: "lo", label: "下轨" }];
   if (kind === "MACD") return [{ key: "line", label: "MACD" }, { key: "sig", label: "信号线" }, { key: "zero", label: "零轴" }];
   if (kind === "STOCH") return [{ key: "k", label: "K" }, { key: "d", label: "D" }];
@@ -152,7 +155,26 @@ export function lineSlots(kind: IndKind): { key: string; label: string }[] {
 }
 
 export function hasHist(kind: IndKind) {
-  return kind === "MACD";
+  return kind === "MACD" || kind === "VOL";
+}
+
+/** Label for a plot slot id suffix (e.g. "line", "hist"). */
+export function slotLabel(kind: IndKind, slot: string): string {
+  if (slot === "hist") return kind === "VOL" ? "Vol" : "柱";
+  return lineSlots(kind).find((s) => s.key === slot)?.label ?? slot;
+}
+
+/** Value of a plot at bar time; null time → last point (leave-chart fallback). */
+export function plotValueAt(plot: Plot, time: number | null): number | undefined {
+  const pts = plot.points;
+  if (!pts.length) return undefined;
+  if (time == null) return pts[pts.length - 1]?.value;
+  // Exact match — crosshair time is the candle's unix sec.
+  for (let i = pts.length - 1; i >= 0; i--) {
+    if (pts[i].time === time) return pts[i].value;
+    if (pts[i].time < time) break;
+  }
+  return undefined;
 }
 
 /** Defaults reproduce the pre-style rendering exactly (palette colour by id, width 1, solid). */
@@ -409,6 +431,18 @@ export async function computeIndicators(bars: Bar[], insts: IndInst[], base: num
       } else if (inst.kind === "ATR") {
         const out = runTA(mod, "TA_ATR", [high, low, close], ["number"], [param(inst, "period")], 1);
         plots.push(plotOf(inst, "line", pane, color, "line", bars, out.cols[0], out.beg, price));
+      } else if (inst.kind === "VOL") {
+        // Blind: relative to mean volume (×); unveiled: raw. Color by candle direction (histFollow respects greenUp).
+        const vols = relVolume(bars, base);
+        const hist = bars.map((b, i) => {
+          const rise = b.c >= b.o;
+          return {
+            time: Math.floor(b.t / 1000),
+            value: vols[i],
+            color: alphaHex(rise ? hUp : hDown, st.histOpacity),
+          };
+        });
+        plots.push({ id: `${inst.id}:hist`, inst: inst.id, pane, color: "#8A939D", style: "hist", points: hist });
       } else if (inst.kind === "OBV") {
         const out = runTA(mod, "TA_OBV", [close, relVolume(bars, base)], [], [], 1);
         plots.push(plotOf(inst, "line", pane, color, "line", bars, out.cols[0], out.beg, (v) => v));

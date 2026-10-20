@@ -13,7 +13,7 @@ function isInterval(v: string): v is Interval {
 
 export function loadConfig(): Config {
   const saved = store.get<Partial<Config>>("fut-cfg", {});
-  const cfg: Config = { pool: "top30", intervals: "15m,1h,4h,1d", greenUp: true };
+  const cfg: Config = { pool: "top30", intervals: "5m,15m,1h,4h,1d", greenUp: true };
   if (saved.pool && isPool(saved.pool)) cfg.pool = saved.pool;
   const ivs = String(saved.intervals || "")
     .split(",")
@@ -271,6 +271,13 @@ export function loadInds(): IndInst[] {
     }
     const id = next++;
     out.push({ id, kind: def.kind as IndKind, params, style: styleOf({ id, kind: def.kind }) });
+  }
+  // Migrate always-on main-pane volume → VOL sub-pane (seed once; user removal sticks).
+  if (!out.some((i) => i.kind === "VOL") && !store.get("fut-vol-seeded", false)) {
+    const id = Math.max(next, out.reduce((m, i) => Math.max(m, i.id), 0) + 1);
+    out.push({ id, kind: "VOL", params: {}, style: styleOf({ id, kind: "VOL" }) });
+    store.set("fut-vol-seeded", true);
+    store.set("fut-ind", out);
   }
   return out;
 }

@@ -11,7 +11,7 @@ import { IndWindow } from "@/components/ind-window";
 import type { IndInst, IndKind } from "@/lib/indicators";
 import type { DrawKind, Interval } from "@/lib/types";
 
-const TV_IV: Record<Interval, string> = { "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D" };
+const TV_IV: Record<Interval, string> = { "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D" };
 
 export type Tool = "cursor" | DrawKind;
 
@@ -80,6 +80,14 @@ export function ChartTools({
 
 export type Ohlc = { o: number; h: number; l: number; c: number; vol: number | null } | null;
 
+/** Hover / latest values for one indicator instance shown in the chart header. */
+export type IndReadout = {
+  id: number;
+  title: string;
+  color: string;
+  parts: { key: string; label: string; text: string; color: string }[];
+};
+
 export function ChartBar({
   intervals,
   active,
@@ -87,6 +95,7 @@ export function ChartBar({
   inds,
   indError,
   ohlc,
+  indReadout,
   blind,
   onView,
   onAdd,
@@ -98,6 +107,7 @@ export function ChartBar({
   inds: IndInst[];
   indError: string;
   ohlc: Ohlc;
+  indReadout: IndReadout[];
   blind: boolean;
   onView: (iv: Interval) => void;
   onAdd: (kind: IndKind) => void;
@@ -137,13 +147,27 @@ export function ChartBar({
         <Lock className="size-3 shrink-0" />
         <span className="truncate">{note}</span>
       </Badge>
-      {ohlc && (
-        <div className="num ml-auto flex shrink-0 items-center gap-2.5 text-[11px] text-fg-3">
-          <span>O <i className="text-fg-2 not-italic">{f(ohlc.o)}</i></span>
-          <span>H <i className="text-fg-2 not-italic">{f(ohlc.h)}</i></span>
-          <span>L <i className="text-fg-2 not-italic">{f(ohlc.l)}</i></span>
-          <span>C <i className={`not-italic ${up ? "text-up" : "text-down"}`}>{f(ohlc.c)}</i></span>
-          {ohlc.vol != null && <span>Vol <i className="text-fg-2 not-italic">{ohlc.vol.toFixed(2)}×</i></span>}
+      {(ohlc || indReadout.length > 0) && (
+        <div className="num ml-auto flex min-w-0 shrink items-center gap-2.5 overflow-x-auto text-[11px] text-fg-3">
+          {ohlc && (
+            <>
+              <span>O <i className="text-fg-2 not-italic">{f(ohlc.o)}</i></span>
+              <span>H <i className="text-fg-2 not-italic">{f(ohlc.h)}</i></span>
+              <span>L <i className="text-fg-2 not-italic">{f(ohlc.l)}</i></span>
+              <span>C <i className={`not-italic ${up ? "text-up" : "text-down"}`}>{f(ohlc.c)}</i></span>
+              {ohlc.vol != null && <span>Vol <i className="text-fg-2 not-italic">{ohlc.vol.toFixed(2)}×</i></span>}
+            </>
+          )}
+          {indReadout.map((row) => (
+            <span key={row.id} className="flex shrink-0 items-center gap-1.5 border-l border-line pl-2.5">
+              <b className="font-medium not-italic" style={{ color: row.color }}>{row.title}</b>
+              {row.parts.map((part) => (
+                <span key={part.key}>
+                  {part.label} <i className="not-italic" style={{ color: part.color }}>{part.text}</i>
+                </span>
+              ))}
+            </span>
+          ))}
         </div>
       )}
     </div>

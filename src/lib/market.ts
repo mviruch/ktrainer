@@ -23,7 +23,7 @@ const CSRC: Src[] = [
   {
     name: "币安合约",
     hosts: ["https://fapi.binance.com"],
-    iv: { "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d" },
+    iv: { "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d" },
     cap: 1500,
     url: (h, s, b, st, n) => `${h}/fapi/v1/klines?symbol=${s}&interval=${b}&startTime=${st}&limit=${n}`,
     parse: parseKlines,
@@ -31,7 +31,7 @@ const CSRC: Src[] = [
   {
     name: "币安现货",
     hosts: ["https://data-api.binance.vision", "https://api.binance.com"],
-    iv: { "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d" },
+    iv: { "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d" },
     cap: 1000,
     url: (h, s, b, st, n) => `${h}/api/v3/klines?symbol=${s}&interval=${b}&startTime=${st}&limit=${n}`,
     parse: parseKlines,
@@ -39,7 +39,7 @@ const CSRC: Src[] = [
   {
     name: "Bybit合约",
     hosts: ["https://api.bybit.com"],
-    iv: { "15m": "15", "1h": "60", "4h": "240", "1d": "D" },
+    iv: { "5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D" },
     cap: 1000,
     url: (h, s, b, st, n) =>
       `${h}/v5/market/kline?category=linear&symbol=${s}&interval=${b}&start=${st}&limit=${n}`,

@@ -10,6 +10,7 @@ import {
   indColor,
   indTitle,
   instPane,
+  plotValueAt,
   styleOf,
   type IndStyle,
   type IndGroup,
@@ -132,6 +133,7 @@ export function PaneLegend({
   boxes,
   inds,
   plots,
+  hoverTime = null,
   maxPane,
   onChange,
   onRemove,
@@ -142,6 +144,8 @@ export function PaneLegend({
   boxes: PaneBox[];
   inds: IndInst[];
   plots: Plot[];
+  /** Crosshair bar time; null → show latest point. */
+  hoverTime?: number | null;
   maxPane: string | null;
   onChange: (id: number, key: string, value: number) => void;
   onRemove: (id: number) => void;
@@ -186,7 +190,7 @@ export function PaneLegend({
                     plots
                       .filter((plot) => plot.inst === inst.id && plot.visible !== false && !plot.id.endsWith(":zero"))
                       .map((plot) => {
-                        const value = plot.points.at(-1)?.value;
+                        const value = plotValueAt(plot, hoverTime ?? null);
                         if (value == null || !Number.isFinite(value)) return null;
                         return (
                           <em key={plot.id} style={{ color: plot.style === "hist" ? undefined : plot.color }}>

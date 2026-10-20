@@ -691,7 +691,7 @@ const FIXED = {
 };
 const DEFAULTS = Object.assign({}, FIXED, {
   pool: "top30",      // btc | btceth | top30 | top100
-  intervals: "15m,1h,4h,1d",
+  intervals: "5m,15m,1h,4h,1d",
   greenUp: true,      // true=绿涨红跌  false=红涨绿跌
   density: "auto",
   // 下面几项只给每日一题 / PK 的计划面板用
@@ -729,8 +729,8 @@ const Store = (() => {
   };
 })();
 
-const IV_OK = ["15m", "1h", "4h", "1d"];
-const IV_CN = { "15m": "15分钟", "1h": "1小时", "4h": "4小时", "1d": "日线" };
+const IV_OK = ["5m", "15m", "1h", "4h", "1d"];
+const IV_CN = { "5m": "5分钟", "15m": "15分钟", "1h": "1小时", "4h": "4小时", "1d": "日线" };
 let CFG = (() => {
   const saved = Store.get("fut-cfg", {}) || {};
   const c = Object.assign({}, DEFAULTS);
@@ -779,18 +779,18 @@ async function tryFetch(url, ms) {
 const CSRC = [
   { id: "binance-fut", name: "币安合约",
     hosts: ["https://fapi.binance.com"],
-    iv: { "15m":"15m", "1h":"1h", "4h":"4h", "1d":"1d" }, cap: 1500,
+    iv: { "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h", "1d":"1d" }, cap: 1500,
     url: (h, s, b, st, n) => `${h}/fapi/v1/klines?symbol=${s}&interval=${b}&startTime=${st}&limit=${n}`,
     parse: j => Array.isArray(j)
       ? j.map(k => ({ t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5] })) : null },
   { id: "binance", name: "币安现货",
     hosts: ["https://data-api.binance.vision", "https://api.binance.com"],
-    iv: { "15m":"15m", "1h":"1h", "4h":"4h", "1d":"1d" }, cap: 1000,
+    iv: { "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h", "1d":"1d" }, cap: 1000,
     url: (h, s, b, st, n) => `${h}/api/v3/klines?symbol=${s}&interval=${b}&startTime=${st}&limit=${n}`,
     parse: j => Array.isArray(j)
       ? j.map(k => ({ t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5] })) : null },
   { id: "bybit", name: "Bybit合约", hosts: ["https://api.bybit.com"],
-    iv: { "15m":"15", "1h":"60", "4h":"240", "1d":"D" }, cap: 1000,
+    iv: { "5m":"5", "15m":"15", "1h":"60", "4h":"240", "1d":"D" }, cap: 1000,
     url: (h, s, b, st, n) => `${h}/v5/market/kline?category=linear&symbol=${s}&interval=${b}&start=${st}&limit=${n}`,
     parse: j => {
       const L = j && j.result && j.result.list;

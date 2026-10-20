@@ -19,7 +19,7 @@ import {
   type MouseEventParams,
   type SeriesType,
 } from "lightweight-charts";
-import { fmtNum, volFmt } from "@/lib/format";
+import { fmtNum } from "@/lib/format";
 import type { ChartModel } from "@/lib/chart-model";
 import { DrawPrimitive } from "@/components/draw-primitive";
 import { NowPrimitive } from "@/components/now-primitive";
@@ -45,6 +45,8 @@ type Props = {
   onPanes: (boxes: PaneBox[]) => void;
   onPick: (anchor: Anchor) => void;
   onHover: (anchor: Anchor | null) => void;
+  /** Unix sec of the candle under the crosshair; null when mouse leaves the chart. */
+  onHoverBar?: (time: number | null) => void;
   onSelect?: (id: number | null) => void;
   onUpdateDrawing?: (d: Drawing) => void;
   onOpenStyle?: (id: number) => void;
@@ -103,7 +105,6 @@ type IndHandle = { id: string; series: ISeriesApi<SeriesType, Time> };
 type Api = {
   chart: IChartApi;
   bars: BarApi;
-  volume: ISeriesApi<"Histogram">;
   markers: ISeriesMarkersPluginApi<Time>;
   lines: IPriceLine[];
   draw: DrawPrimitive;
@@ -150,7 +151,7 @@ function hexA(hex: string, a: number) {
 function resetPriceScale(bars: BarApi) {
   bars.priceScale().applyOptions({
     autoScale: true,
-    scaleMargins: { top: 0.08, bottom: 0.22 },
+    scaleMargins: { top: 0.08, bottom: 0.08 },
     mode: PriceScaleMode.Normal,
   });
   bars.priceScale().setAutoScale(true);
@@ -192,6 +193,7 @@ export function KlineChart({
   onPanes,
   onPick,
   onHover,
+  onHoverBar,
   onSelect,
   onUpdateDrawing,
   onOpenStyle,
@@ -276,6 +278,7 @@ export function KlineChart({
   const liqEdgeRef = useRef<{ price: number; label: string; color: string; lo: number; hi: number } | null>(null);
   const pickRef = useRef(onPick);
   const hoverRef = useRef(onHover);
+  const hoverBarRef = useRef(onHoverBar);
   const baseRef = useRef(priceBase);
   const panesRef = useRef(onPanes);
   const plotsRef = useRef(plots);
@@ -290,6 +293,7 @@ export function KlineChart({
   useEffect(() => {
     pickRef.current = onPick;
     hoverRef.current = onHover;
+    hoverBarRef.current = onHoverBar;
     baseRef.current = priceBase;
     panesRef.current = onPanes;
     plotsRef.current = plots;
@@ -331,8 +335,9 @@ export function KlineChart({
         minBarSpacing: 3,
       },
       crosshair: {
-        // Magnet snaps crosshair to OHLC visually; pick/hover still use raw mouse Y.
-        mode: CrosshairMode.Magnet,
+        // Normal: price axis / horz line follow cursor Y (no OHLC magnet).
+        // Vert line still snaps to nearest bar index — library limitation.
+        mode: CrosshairMode.Normal,
         vertLine: {
           width: 1,
           color: "#5D606B",
@@ -346,6 +351,14 @@ export function KlineChart({
           labelBackgroundColor: "#2A2E39",
         },
       },
+      // mouseWheel/pinch only call zoomTime (never price). Price-axis wheel is custom above.
+      handleScale: {
+        mouseWheel: true,
+        pinch: true,
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: { time: true, price: true },
+      },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
     });
     const bars = chart.addSeries(CandlestickSeries, {
       upColor: "#37a74c",
@@ -359,15 +372,10 @@ export function KlineChart({
     });
     // Normal (TV default). Blind % prices sit near 100; log is not required for priceBase scaling.
     bars.priceScale().applyOptions({
-      scaleMargins: { top: 0.08, bottom: 0.22 },
+      scaleMargins: { top: 0.08, bottom: 0.08 },
       mode: PriceScaleMode.Normal,
     });
-    const volume = chart.addSeries(HistogramSeries, {
-      priceScaleId: "volume",
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    // Volume is a VOL sub-pane indicator (see indicators.ts), not glued under candles.
     const markers = createSeriesMarkers(bars, []);
     const draw = new DrawPrimitive();
     const now = new NowPrimitive();
@@ -401,6 +409,9 @@ export function KlineChart({
     };
     const onMove = (param: MouseEventParams<Time>) => {
       hoverRef.current(readAnchor(chart, bars, param, baseRef.current));
+      // seriesData / param.time are nearest-bar (vert line snaps to index even in Normal).
+      if (!param.point || typeof param.time !== "number") hoverBarRef.current?.(null);
+      else hoverBarRef.current?.(param.time);
     };
     chart.subscribeClick(onClick);
     chart.subscribeDblClick(onDblClick);
@@ -484,12 +495,58 @@ export function KlineChart({
         chart.applyOptions({ handleScroll: true, handleScale: true });
       }
     };
+    // Wheel over right price axis → vertical zoom only (library wheel always zooms time).
+    // Capture + stopImmediatePropagation so chart's _onMousewheel does not also zoom time.
+    const onWheel = (ev: WheelEvent) => {
+      const rect = el.getBoundingClientRect();
+      const scaleW = Math.max(bars.priceScale().width(), 48);
+      if (ev.clientX < rect.right - scaleW) return; // main/time area: library handleScale.mouseWheel → zoomTime only
+      if (ev.deltaY === 0) return;
+      if (ev.cancelable) ev.preventDefault();
+      ev.stopImmediatePropagation();
+      const y = ev.clientY - rect.top;
+      const panes = chart.panes();
+      let top = 0;
+      let paneIndex = 0;
+      for (let i = 0; i < panes.length; i++) {
+        const h = panes[i].getHeight();
+        if (y < top + h || i === panes.length - 1) {
+          paneIndex = i;
+          break;
+        }
+        top += h;
+      }
+      const scale = chart.priceScale("right", paneIndex);
+      const range = scale.getVisibleRange();
+      if (!range || !(range.to > range.from)) return;
+      // Same spirit as library time zoom: small step, clamp magnitude.
+      const step = Math.sign(-ev.deltaY) * Math.min(1, Math.abs(ev.deltaY) / 100);
+      const factor = Math.exp(-step * 0.25); // <1 zoom in, >1 zoom out
+      const span = range.to - range.from;
+      let anchor: number;
+      if (paneIndex === 0) {
+        const localY = y; // main pane coords match series coordinateToPrice
+        const px = bars.coordinateToPrice(localY);
+        anchor = px != null ? Number(px) : (range.from + range.to) / 2;
+      } else {
+        const h = panes[paneIndex].getHeight() || 1;
+        const t = Math.min(1, Math.max(0, (y - top) / h));
+        anchor = range.to - t * span; // top of pane ≈ high price
+      }
+      const ratio = Math.min(1, Math.max(0, (anchor - range.from) / span));
+      const newSpan = span * factor;
+      scale.setVisibleRange({ from: anchor - newSpan * ratio, to: anchor + newSpan * (1 - ratio) });
+      priceDrag.current = true; // treat as manual scale so live follow won't force autoScale
+      requestAnimationFrame(refreshLiqEdge);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
     el.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerUp);
-    api.current = { chart, bars, volume, markers, lines: [], draw, now, indSeries: [], indKey: "", paneKey: "" };
+    api.current = { chart, bars, markers, lines: [], draw, now, indSeries: [], indKey: "", paneKey: "" };
     return () => {
+      el.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions);
       el.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
@@ -513,7 +570,6 @@ export function KlineChart({
     };
     if (!data || data.candles.length === 0) {
       a.bars.setData([]);
-      a.volume.setData([]);
       a.markers.setMarkers([]);
       a.now.sync(null);
       for (const line of a.lines) a.bars.removePriceLine(line);
@@ -541,13 +597,6 @@ export function KlineChart({
       priceLineWidth: 1,
       priceLineStyle: LineStyle.Dashed,
       priceFormat: { type: "custom", minMove: 0.00000001, formatter: (p: BarPrice) => fmtNum(Number(p), data.blind) },
-    });
-    a.volume.applyOptions({
-      priceFormat: {
-        type: "custom",
-        minMove: data.blind ? 0.01 : 1,
-        formatter: (p: BarPrice) => (data.blind ? Number(p).toFixed(1) + "×" : volFmt(Number(p))),
-      },
     });
     a.chart.applyOptions({
       timeScale: {
@@ -584,7 +633,6 @@ export function KlineChart({
         };
       }),
     );
-    a.volume.setData(data.volume.map((v) => ({ time: v.time as UTCTimestamp, value: v.value, color: v.color })));
     a.markers.setMarkers(
       data.marks.map((m) => ({
         time: m.time as UTCTimestamp,

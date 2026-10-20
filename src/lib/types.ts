@@ -1,6 +1,6 @@
 export type Side = 1 | -1;
 export type MarginMode = "cross" | "isolated";
-export type Interval = "15m" | "1h" | "4h" | "1d";
+export type Interval = "5m" | "15m" | "1h" | "4h" | "1d";
 export type Pool = "btc" | "btceth" | "top30" | "top100";
 export type OrderTab = "market" | "limit";
 export type Phase = "empty" | "loading" | "error" | "trade" | "result";
