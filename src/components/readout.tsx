@@ -45,7 +45,7 @@ export function Readout() {
   return (
     <header id="readout" className="flex h-14 shrink-0 items-center gap-5 overflow-x-auto border-b border-line bg-panel px-4">
       <div className="flex shrink-0 items-center gap-2">
-        <span className="size-5 rounded-[4px] bg-brand" aria-hidden />
+        <img src="/A-kline-k-icon.svg" alt="" aria-hidden className="size-[22px] shrink-0" />
         <span className="text-[14px] font-bold">ktrainer</span>
         <Badge>盲测 · USDT 永续</Badge>
       </div>
