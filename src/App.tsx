@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router";
+import { PhoneOrderChrome, usePhoneLayout } from "@/components/phone-order";
 import { Readout } from "@/components/readout";
 import { Side } from "@/components/result-panel";
 import { ActionSheets, RouteSheets } from "@/components/sheets";
@@ -29,9 +30,11 @@ export function App() {
 
 function Shell() {
   const t = useTrainer();
+  const phone = usePhoneLayout();
   useEffect(() => {
     const apply = () => {
-      document.body.classList.toggle("compact", window.innerHeight < 860 || window.innerWidth < 1180);
+      // compact chrome when short, or when wide but not full desktop
+      document.body.classList.toggle("compact", window.innerHeight < 860 || (window.innerWidth >= 1024 && window.innerWidth < 1280));
     };
     apply();
     window.addEventListener("resize", apply);
@@ -46,7 +49,7 @@ function Shell() {
       <Readout />
       <div id="main">
         <Stage />
-        <Side />
+        {phone ? <PhoneOrderChrome /> : <Side />}
       </div>
       <Outlet />
       <RouteSheets />

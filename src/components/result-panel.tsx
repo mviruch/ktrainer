@@ -6,10 +6,10 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-export function Side() {
+export function SideContent() {
   const t = useTrainer();
   return (
-    <aside id="side">
+    <>
       {t.phase === "trade" && t.round && <TradePanel key={t.round.startedAt} />}
       {t.phase === "result" && <ResultPanel />}
       {t.phase === "loading" && (
@@ -30,6 +30,14 @@ export function Side() {
           <p className="sheet-copy">点「开始第一局」抽一段行情。币种、日期和价格轴都会先藏起来。</p>
         </div>
       )}
+    </>
+  );
+}
+
+export function Side() {
+  return (
+    <aside id="side">
+      <SideContent />
     </aside>
   );
 }

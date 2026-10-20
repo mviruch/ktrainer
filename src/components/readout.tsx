@@ -47,15 +47,13 @@ export function Readout() {
       <div className="flex shrink-0 items-center gap-2">
         <img src="/A-kline-k-icon.svg" alt="" aria-hidden className="size-[22px] shrink-0" />
         <span className="text-[14px] font-bold">ktrainer</span>
-        <Badge>盲测 · USDT 永续</Badge>
+        <Badge className="max-lg:hidden">盲测 · USDT 永续</Badge>
+        <Badge className="lg:hidden">盲测</Badge>
       </div>
-      <Separator orientation="vertical" className="!h-7" />
-      <Metric label="初始本金">{uFmt(FIXED.account, 0)}</Metric>
-      <div className="flex shrink-0 flex-col justify-center gap-0.5">
-        <span className="text-[11px] leading-none text-fg-3">账户权益 USDT</span>
-        <b className="num text-[20px] leading-6 font-semibold">{uFmt(live)}</b>
-      </div>
-      <Metric label="本局盈亏">
+      <Separator orientation="vertical" className="!h-7 !self-center max-lg:hidden" />
+      <Metric label="初始本金" className="max-lg:hidden">{uFmt(FIXED.account, 0)}</Metric>
+      <Metric label="账户权益">{uFmt(live)}</Metric>
+      <Metric label="本局盈亏" className="max-sm:hidden">
         {rp == null ? (
           <span className="text-fg-3">—</span>
         ) : (
@@ -64,16 +62,17 @@ export function Readout() {
           </span>
         )}
       </Metric>
-      <Separator orientation="vertical" className="!h-7" />
-      <Metric label="本场进度">
+      <Separator orientation="vertical" className="!h-7 !self-center max-lg:hidden" />
+      <Metric label="本场进度" className="max-md:hidden">
         {t.acc.runN || 0} / {FIXED.runSize}
       </Metric>
-      <Metric label="累计局数">{t.log.length}</Metric>
-      <Metric label="胜率">{done.length ? Math.round((wins / done.length) * 100) + "%" : "—"}</Metric>
-      <Metric label="累计盈亏">
+      {/* Wide-only cumulative group; phone uses 统计 dialog */}
+      <Metric label="累计局数" className="max-lg:hidden">{t.log.length}</Metric>
+      <Metric label="胜率" className="max-lg:hidden">{done.length ? Math.round((wins / done.length) * 100) + "%" : "—"}</Metric>
+      <Metric label="累计盈亏" className="max-lg:hidden">
         <span className={t.log.length ? tone(tot) : "text-fg-3"}>{t.log.length ? sgnU(tot) : "—"}</span>
       </Metric>
-      <Metric label="累计手续费">{fee ? "-" + uFmt(fee) : uFmt(0)}</Metric>
+      <Metric label="累计手续费" className="max-lg:hidden">{fee ? "-" + uFmt(fee) : uFmt(0)}</Metric>
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {icon("统计", "/stats", <BarChart3 />)}
         {icon("设置", "/settings", <Settings />)}

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { AlignJustify, Lock, Minus, MousePointer2, MoveUpRight, Trash2, TrendingUp, Undo2 } from "lucide-react";
+import { AlignJustify, Minus, MousePointer2, MoveUpRight, Trash2, TrendingUp, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -91,7 +91,6 @@ export type IndReadout = {
 export function ChartBar({
   intervals,
   active,
-  note,
   inds,
   indError,
   ohlc,
@@ -103,7 +102,6 @@ export function ChartBar({
 }: {
   intervals: Interval[];
   active: Interval | "";
-  note: string;
   inds: IndInst[];
   indError: string;
   ohlc: Ohlc;
@@ -130,7 +128,7 @@ export function ChartBar({
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
-      <Separator orientation="vertical" className="!h-[18px] shrink-0" />
+      <Separator orientation="vertical" className="!h-[18px] shrink-0 !self-center" />
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button variant="ghost" size="xs" className={open || inds.length ? "text-chalk" : ""}>
@@ -143,10 +141,6 @@ export function ChartBar({
           <IndWindow inds={inds} error={indError} onAdd={onAdd} onRemove={onRemove} onClose={() => setOpen(false)} />
         </PopoverContent>
       </Popover>
-      <Badge variant="brand" className="min-w-0 shrink overflow-hidden rounded-[3px] px-2 py-0.5 font-normal" title={note}>
-        <Lock className="size-3 shrink-0" />
-        <span className="truncate">{note}</span>
-      </Badge>
       {(ohlc || indReadout.length > 0) && (
         <div className="num ml-auto flex min-w-0 shrink items-center gap-2.5 overflow-x-auto text-[11px] text-fg-3">
           {ohlc && (

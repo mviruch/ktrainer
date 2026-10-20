@@ -36,6 +36,8 @@ export type ChartModel = {
   marks: MarkPoint[];
   /** Unix sec of the live cursor candle (last non-peeked bar); null if none. */
   nowTime: number | null;
+  /** First candle unix sec — relative-time origin while blind. */
+  t0: number | null;
   blind: boolean;
   live: boolean;
 };
@@ -132,5 +134,5 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
       break;
     }
   }
-  return { candles, volume, lines, marks, nowTime, blind, live: !round.done };
+  return { candles, volume, lines, marks, nowTime, t0: candles[0]?.time ?? null, blind, live: !round.done };
 }

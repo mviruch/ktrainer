@@ -7,9 +7,10 @@ import type {
   UTCTimestamp,
 } from "lightweight-charts";
 
-const LINE = "rgba(214, 218, 228, 0.95)";
-const LABEL_BG = "rgba(42, 46, 57, 0.96)";
-const LABEL = "#F0F3FA";
+/** Softer than prior 0.45 / 1px so NOW stays behind candles. */
+const LINE = "rgba(214, 218, 228, 0.26)";
+const LABEL_BG = "rgba(42, 46, 57, 0.42)";
+const LABEL = "rgba(240, 243, 250, 0.62)";
 const RIGHT_INSET = 56; // keep tag clear of the right price scale
 
 type Host = {
@@ -33,19 +34,19 @@ class NowRenderer implements IPrimitivePaneRenderer {
       const h = scope.mediaSize.height;
       const xx = Math.round(x) + 0.5;
       ctx.strokeStyle = LINE;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 0.75;
+      ctx.setLineDash([3, 5]);
       ctx.beginPath();
       ctx.moveTo(xx, 0);
       ctx.lineTo(xx, h);
       ctx.stroke();
       ctx.setLineDash([]);
       const tag = "NOW";
-      ctx.font = "600 11px ui-monospace, Menlo, Consolas, monospace";
+      ctx.font = "500 10px ui-monospace, Menlo, Consolas, monospace";
       const tw = ctx.measureText(tag).width;
       const padX = 5;
       const boxW = tw + padX * 2;
-      const boxH = 16;
+      const boxH = 14;
       const rightLimit = scope.mediaSize.width - RIGHT_INSET;
       // Prefer label to the left of the line when near the price scale.
       let bx = xx + 5;
@@ -53,8 +54,8 @@ class NowRenderer implements IPrimitivePaneRenderer {
       if (bx < 2) bx = 2;
       ctx.fillStyle = LABEL_BG;
       ctx.fillRect(bx, 2, boxW, boxH);
-      ctx.strokeStyle = "rgba(180, 184, 196, 0.55)";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(180, 184, 196, 0.28)";
+      ctx.lineWidth = 0.75;
       ctx.strokeRect(bx + 0.5, 2.5, boxW - 1, boxH - 1);
       ctx.fillStyle = LABEL;
       ctx.textBaseline = "middle";
@@ -73,7 +74,7 @@ export class NowPrimitive implements ISeriesPrimitive<Time> {
 
   constructor() {
     const renderer = new NowRenderer(this);
-    this.views = [{ zOrder: () => "top", renderer: () => renderer }];
+    this.views = [{ zOrder: () => "bottom", renderer: () => renderer }];
   }
 
   attached(param: SeriesAttachedParameter<Time>) {

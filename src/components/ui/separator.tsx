@@ -6,7 +6,7 @@ export function Separator({ className, orientation = "horizontal", ...props }: C
   return (
     <SeparatorPrimitive.Root
       orientation={orientation}
-      className={cn(orientation === "vertical" ? "h-auto w-px self-stretch bg-line" : "h-px w-full bg-line", className)}
+      className={cn(orientation === "vertical" ? "h-5 w-px shrink-0 self-center bg-line" : "h-px w-full bg-line", className)}
       {...props}
     />
   );

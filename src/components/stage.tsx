@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Maximize2, Pause, Play, RefreshCw, SkipForward } from "lucide-react";
+import { ChevronsDownUp, Eye, Maximize2, Ellipsis, Pause, Play, RefreshCw, SkipForward } from "lucide-react";
 import { IV_CN, IV_OK } from "@/lib/constants";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -16,22 +16,26 @@ import { DEFAULT_CHANNEL_STYLE, type Anchor, type Drawing, type DrawStyle } from
 import { canSkip } from "@/lib/engine";
 import { useTrainer } from "@/state/trainer";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { KlineChart } from "@/components/kline-chart";
 import { IndSettingsDialog } from "@/components/ind-settings";
 import { DrawStyleDialog } from "@/components/draw-style";
+import { usePhoneLayout } from "@/components/phone-order";
 
-function speedLabel(v: number) {
-  return `${+v.toFixed(2)} 秒/根`;
-}
 
 const SPEED_PRESETS = [3, 5, 10];
 
 function Kbd({ children }: { children: string }) {
-  return <Badge variant="kbd">{children}</Badge>;
+  return <Badge variant="kbd" className="hidden lg:inline-flex">{children}</Badge>;
 }
 
 export function Transport() {
   const t = useTrainer();
+  const phone = usePhoneLayout();
+  /** Wide default expanded; fold extras into 「⋯ 更多」. Phone keeps shortened extras inline (scroll). */
+  const [folded, setFolded] = useState(false);
+  const wideFolded = !phone && folded;
+  const short = phone || wideFolded;
   const on = t.phase === "trade";
   const baseIv = t.round?.interval ?? null;
   const viewIv = t.round ? activeView(t.round) : null;
@@ -39,8 +43,8 @@ export function Transport() {
   const barLabel = (() => {
     if (!baseIv) return "";
     const base = IV_CN[baseIv];
-    if (viewIv && viewIv !== baseIv) return `第 ${n} 根 · ${base}视图切到 ${IV_CN[viewIv]}`;
-    return `第 ${n} 根 · ${base}`;
+    if (viewIv && viewIv !== baseIv) return `#${n} · ${IV_CN[viewIv]}`;
+    return `#${n} · ${base}`;
   })();
   const count = !t.round
     ? ""
@@ -48,69 +52,143 @@ export function Transport() {
       ? "正在往后续拉行情…"
       : t.round.done
         ? `本局走了 ${n} 根`
-        : `${barLabel} · ${speedLabel(t.speed)}${t.playing ? " · 播放中" : ""}`;
+        : `${barLabel}${t.playing ? " · 播放" : ""}`;
   const preset = SPEED_PRESETS.includes(t.speed) ? String(t.speed) : "custom";
   const skipOk = canSkip(t.round);
+
+  const speed = (
+    <div className={`flex h-7 shrink-0 items-center gap-0.5 rounded-[4px] bg-ink px-1 ${on ? "" : "opacity-40"}`}>
+      <span className={`px-1 text-[11px] text-fg-3 ${short ? "hidden" : "inline"}`}>速度</span>
+      <ToggleGroup
+        type="single"
+        value={preset}
+        disabled={!on}
+        aria-label="播放速度"
+        onValueChange={(v) => {
+          if (!v) return;
+          if (v === "custom") t.openDialog({ kind: "speed" });
+          else t.setSpeed(+v);
+        }}
+      >
+        {SPEED_PRESETS.map((v) => (
+          <ToggleGroupItem key={v} value={String(v)} className="num text-[11px]">
+            {v}s
+          </ToggleGroupItem>
+        ))}
+        <ToggleGroupItem value="custom" className="text-[11px]" onClick={() => preset === "custom" && t.openDialog({ kind: "speed" })}>
+          {preset === "custom" ? `${+t.speed.toFixed(2)}s` : short ? "…" : "自定义…"}
+        </ToggleGroupItem>
+      </ToggleGroup>
+    </div>
+  );
+
+  const endBtn = (
+    <Button variant="danger" size="sm" disabled={!on} onClick={t.requestEnd} className="h-8 min-h-8 shrink-0">
+      {short ? "结束" : "结束本局"}
+    </Button>
+  );
+  const peekBtn = (
+    <Button size="sm" disabled={!(on || t.phase === "result") || t.peeking} onClick={t.requestPeek} className="h-8 min-h-8 shrink-0">
+      {!phone && <Eye />}
+      {short ? "揭示" : "揭示 300 根"}
+    </Button>
+  );
+  const abortBtn = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={skipOk ? -1 : 0} className="shrink-0">
+          <Button size="sm" disabled={!skipOk} onClick={t.abort} className="h-8 min-h-8">
+            <RefreshCw />
+            换一段
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{skipOk ? "还没交易时可以换一段行情，不算局数" : "已经交易过，这一局不能换了"}</TooltipContent>
+    </Tooltip>
+  );
+  const fitBtn = (
+    <Button size="sm" disabled={!t.round} onClick={t.fit} className="h-8 min-h-8 shrink-0">
+      <Maximize2 />
+      适应
+      {!short && <Kbd>F</Kbd>}
+    </Button>
+  );
+  /** Phone design: 播放/下一根/速度/结束/揭示. 换一段+适应 go in ⋯. */
+  const moreExtras = (
+    <>
+      {abortBtn}
+      {fitBtn}
+    </>
+  );
+  /** Wide: end lives only in right dense panel; transport keeps abort/peek/fit. */
+  const wideExtras = (
+    <>
+      {abortBtn}
+      {peekBtn}
+      {fitBtn}
+    </>
+  );
+
   return (
-    <div id="transport" className="flex h-11 shrink-0 items-center gap-2 border-t border-line bg-panel px-3">
-      <Button variant="primary" size="sm" disabled={!on} onClick={t.togglePlay} className="min-w-[78px]">
+    <div
+      id="transport"
+      className={`flex min-h-11 shrink-0 items-center gap-1.5 overflow-x-auto border-t border-line bg-panel px-2 sm:gap-2 sm:px-3 ${short ? "transport-compact" : ""}`}
+    >
+      <Button variant="primary" size="sm" disabled={!on} onClick={t.togglePlay} className="h-8 min-h-8 shrink-0">
         {t.playing ? <Pause /> : <Play />}
         {t.playing ? "暂停" : "播放"}
-        <Kbd>空格</Kbd>
+        {!short && <Kbd>空格</Kbd>}
       </Button>
-      <Button size="sm" disabled={!on} onClick={t.step} title="按当前视图周期走一根">
+      <Button size="sm" disabled={!on} onClick={t.step} title="按当前视图周期走一根" className="h-8 min-h-8 shrink-0">
         <SkipForward />
         下一根
-        <Kbd>→</Kbd>
+        {!short && <Kbd>→</Kbd>}
       </Button>
-      <div className={`flex h-7 items-center gap-0.5 rounded-[4px] bg-ink px-1 ${on ? "" : "opacity-40"}`}>
-        <span className="px-1 text-[11px] text-fg-3">速度</span>
-        <ToggleGroup
-          type="single"
-          value={preset}
-          disabled={!on}
-          aria-label="播放速度"
-          onValueChange={(v) => {
-            if (!v) return;
-            if (v === "custom") t.openDialog({ kind: "speed" });
-            else t.setSpeed(+v);
-          }}
-        >
-          {SPEED_PRESETS.map((v) => (
-            <ToggleGroupItem key={v} value={String(v)} className="num text-[11px]">
-              {v}s
-            </ToggleGroupItem>
-          ))}
-          <ToggleGroupItem value="custom" className="text-[11px]" onClick={() => preset === "custom" && t.openDialog({ kind: "speed" })}>
-            {preset === "custom" ? `${+t.speed.toFixed(2)}s` : "自定义…"}
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
-      <Separator orientation="vertical" className="!h-5 shrink-0" />
-      <Button variant="danger" size="sm" disabled={!on} onClick={t.requestEnd}>
-        结束本局
-      </Button>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span tabIndex={skipOk ? -1 : 0}>
-            <Button size="sm" disabled={!skipOk} onClick={t.abort}>
-              <RefreshCw />
-              换一段
+      {speed}
+      {phone ? (
+        <>
+          <Separator orientation="vertical" className="!h-5 shrink-0" />
+          {endBtn}
+          {peekBtn}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="sm" variant="ghost" className="h-8 min-h-8 shrink-0" aria-label="更多控制">
+                <Ellipsis />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="flex w-auto flex-col gap-1.5 p-2">
+              {moreExtras}
+            </PopoverContent>
+          </Popover>
+        </>
+      ) : wideFolded ? (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button size="sm" variant="ghost" className="h-8 min-h-8 shrink-0" aria-label="更多控制">
+              <Ellipsis />
+              更多
             </Button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{skipOk ? "还没交易时可以换一段行情，不算局数" : "已经交易过，这一局不能换了"}</TooltipContent>
-      </Tooltip>
-      <Button size="sm" disabled={!(on || t.phase === "result") || t.peeking} onClick={t.requestPeek}>
-        <Eye />
-        揭示 300 根
-      </Button>
-      <Button size="sm" disabled={!t.round} onClick={t.fit}>
-        <Maximize2 />
-        适应
-        <Kbd>F</Kbd>
-      </Button>
-      <div id="barcount" className="num ml-auto flex min-w-0 items-center gap-1.5 truncate text-[11px] text-fg-2">
+          </PopoverTrigger>
+          <PopoverContent align="start" className="flex w-auto flex-col gap-1.5 p-2">
+            {wideExtras}
+          </PopoverContent>
+        </Popover>
+      ) : (
+        <>
+          <Separator orientation="vertical" className="!h-5 shrink-0" />
+          {wideExtras}
+          <Button size="sm" variant="ghost" className="h-8 shrink-0 text-fg-3" onClick={() => setFolded(true)} title="折叠控制条">
+            <ChevronsDownUp className="size-3.5" />
+            收起
+          </Button>
+        </>
+      )}
+      {wideFolded && (
+        <Button size="sm" variant="ghost" className="h-8 shrink-0 text-fg-3" onClick={() => setFolded(false)} title="展开控制条">
+          展开
+        </Button>
+      )}
+      <div id="barcount" className="num ml-auto flex min-w-0 shrink items-center gap-1.5 truncate text-[11px] text-fg-2">
         {count && <span className={`size-1.5 shrink-0 rounded-full ${t.playing ? "bg-up" : "bg-fg-3"}`} />}
         <span className="truncate">{count}</span>
       </div>
@@ -264,11 +342,6 @@ export function Stage() {
     }
     return rows;
   })();
-  const note = !round
-    ? "标的与时间已屏蔽"
-    : round.done
-      ? "已揭盲 · 标的仍隐藏"
-      : "标的/时间/价格已屏蔽 · 纵轴=开局收盘 100";
   const intervals = round ? intervalList(round) : IV_OK.filter((iv) => t.cfg.intervals.split(",").includes(iv));
   const commitInds = (next: IndInst[]) => {
     setInds(next);
@@ -307,7 +380,6 @@ export function Stage() {
         <ChartBar
           intervals={intervals}
           active={round ? activeView(round) : ""}
-          note={note}
           inds={inds}
           indError={indError}
           ohlc={ohlc}

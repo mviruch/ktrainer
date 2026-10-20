@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FEE_MAKER, FEE_TAKER, MMR } from "@/lib/constants";
 import { availBal, equityAt, liqPrice, maxOpen, posIM, priceNow, uPnl } from "@/lib/engine";
-import { blindBaseOf, fmtPrice, parsePrice, pctFmt, sgnU, uFmt } from "@/lib/format";
+import { blindBaseOf, fmtPrice, parsePrice, pctFmt, sgnU, uFmt, filterDecimal } from "@/lib/format";
 import type { OrderTab, Side } from "@/lib/types";
 import { useTrainer } from "@/state/trainer";
 import { Button } from "@/components/ui/button";
@@ -11,9 +11,11 @@ import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { usePhoneLayout } from "@/components/phone-order";
 
 export function TradePanel() {
   const t = useTrainer();
+  const phone = usePhoneLayout();
   const round = t.round;
   const [amt, setAmt] = useState("");
   const [pct, setPct] = useState(0);
@@ -93,7 +95,7 @@ export function TradePanel() {
           <span>价格</span>
           {t.tab === "limit" ? (
             <>
-              <input value={limit} inputMode="decimal" autoComplete="off" onChange={(e) => setLimit(e.target.value)} />
+              <input value={limit} inputMode="decimal" autoComplete="off" onChange={(e) => setLimit(filterDecimal(e.target.value))} />
               <Button variant="link" size="xs" onClick={() => setLimit(fmtPrice(p, base))}>
                 最新
               </Button>
@@ -113,7 +115,7 @@ export function TradePanel() {
             placeholder="仓位价值"
             autoComplete="off"
             onChange={(e) => {
-              setAmt(e.target.value);
+              setAmt(filterDecimal(e.target.value));
               setPct(0);
             }}
           />
@@ -147,11 +149,11 @@ export function TradePanel() {
           <div className="grid grid-cols-2 gap-2">
             <div className="tr-field">
               <span>止盈</span>
-              <input value={tp} inputMode="decimal" placeholder="触发价" autoComplete="off" onChange={(e) => setTp(e.target.value)} />
+              <input value={tp} inputMode="decimal" placeholder="触发价" autoComplete="off" onChange={(e) => setTp(filterDecimal(e.target.value))} />
             </div>
             <div className="tr-field">
               <span>止损</span>
-              <input value={sl} inputMode="decimal" placeholder="触发价" autoComplete="off" onChange={(e) => setSl(e.target.value)} />
+              <input value={sl} inputMode="decimal" placeholder="触发价" autoComplete="off" onChange={(e) => setSl(filterDecimal(e.target.value))} />
             </div>
           </div>
         )}
@@ -222,9 +224,12 @@ export function TradePanel() {
           <b>账户</b>
         </div>
         <AccountGrid />
-        <Button variant="danger" className="mt-3 h-9 w-full" onClick={t.requestEnd}>
-          结束本局
-        </Button>
+        {/* Wide only: primary end entry. Phone uses transport 「结束」. */}
+        {!phone && (
+          <Button variant="danger" className="mt-3 h-9 w-full" onClick={t.requestEnd}>
+            结束本局
+          </Button>
+        )}
       </section>
     </div>
   );

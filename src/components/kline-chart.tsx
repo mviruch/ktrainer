@@ -128,6 +128,15 @@ function fmtAxis(time: Time) {
   return `${m}-${day} ${hh}:${mm}`;
 }
 
+/** Blind desensitized axis: elapsed from session t0 as +H:MM (no calendar leak). */
+function fmtRel(time: Time, t0: number) {
+  if (typeof time !== "number") return "";
+  const sec = Math.max(0, Math.floor(time - t0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `+${h}:${String(m).padStart(2, "0")}`;
+}
+
 const lineStyle = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted, sparse: LineStyle.SparseDotted };
 
 function measurePanes(chart: IChartApi, plots: Plot[]): PaneBox[] {
@@ -598,15 +607,19 @@ export function KlineChart({
       priceLineStyle: LineStyle.Dashed,
       priceFormat: { type: "custom", minMove: 0.00000001, formatter: (p: BarPrice) => fmtNum(Number(p), data.blind) },
     });
+    const t0 = data.t0;
     a.chart.applyOptions({
       timeScale: {
-        visible: !data.blind,
+        visible: true,
         timeVisible: true,
         secondsVisible: false,
         borderColor: "#2A2E39",
-        tickMarkFormatter: (time: Time) => (data.blind ? "" : fmtAxis(time)),
+        tickMarkFormatter: (time: Time) =>
+          data.blind && t0 != null ? fmtRel(time, t0) : data.blind ? "" : fmtAxis(time),
       },
-      localization: { timeFormatter: (time: Time) => fmtAxis(time) },
+      localization: {
+        timeFormatter: (time: Time) => (data.blind && t0 != null ? fmtRel(time, t0) : fmtAxis(time)),
+      },
     });
     a.bars.setData(
       data.candles.map((c) => {
@@ -849,12 +862,7 @@ export function KlineChart({
 
   return (
     <div className="relative h-full w-full">
-      <div ref={ref} className={model?.blind ? "h-[calc(100%-30px)] w-full" : "h-full w-full"} />
-      {model?.blind ? (
-        <div className="absolute inset-x-0 bottom-0 flex h-[30px] items-center border-t border-line pl-4 text-[11px] text-fg-3">
-          时间轴已屏蔽 · 揭盲后显示
-        </div>
-      ) : null}
+      <div ref={ref} className="h-full w-full" />
       {overlay.mask ? (
         <div
           className="unplayed-mask pointer-events-none absolute top-0 z-[2] bg-[#1E222D40]"

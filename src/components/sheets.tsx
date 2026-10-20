@@ -12,7 +12,7 @@ import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FEE_TAKER, FIXED, IV_CN, IV_OK, LEV_CHIPS, LEV_MAX, POOLS, SPEED_MAX, SPEED_MIN } from "@/lib/constants";
 import { availBal, opp, priceNow, slipPx, uPnl } from "@/lib/engine";
-import { bjDate, fmtPrice, parsePrice, sgnU, uFmt } from "@/lib/format";
+import { bjDate, fmtPrice, parsePrice, sgnU, uFmt, filterDecimal } from "@/lib/format";
 import { download, statsOf } from "@/lib/stats";
 import { store } from "@/lib/store";
 import type { Pool } from "@/lib/types";
@@ -299,7 +299,9 @@ function HelpBody({ onClose }: { onClose: () => void }) {
       <h3 className="sheet-h">撮合</h3>
       <p className="sheet-copy">只有开高低收。阳线按开→低→高→收，阴线按开→高→低→收。挂单、止损、止盈、强平谁先被碰到谁先处理。跳空越过的价位按开盘价成交。</p>
       <h3 className="sheet-h">图表</h3>
-      <p className="sheet-copy">滚轮缩放，拖拽平移。F 适应全部。左边可以画趋势线、射线、水平线和斐波那契，Esc 取消。图上方打开指标，按类型选，点一下加到主图或副图，参数在那张图上改。指标用 TA-Lib，只吃已经走出的 K 线。揭盲前不显示时间轴，成交量用相对均量，避免从成交量认出币种。</p>
+      <p className="sheet-copy">滚轮缩放，拖拽平移。F 适应全部。左边可以画趋势线、射线、水平线和斐波那契，Esc 取消。图上方打开指标，按类型选，点一下加到主图或副图，参数在那张图上改。指标用 TA-Lib，只吃已经走出的 K 线。</p>
+      <h3 className="sheet-h">脱敏</h3>
+      <p className="sheet-copy">盲测中标的、日历时间和绝对价格都先藏起来：开局那根收盘记作 100，纵轴是相对开局的百分比；时间轴显示相对开局的经过时间（+H:MM）；成交量用相对均量。结束本局揭盲后显示真实币种、时间和价格。</p>
       <DialogFooter>
         <Button variant="primary" onClick={onClose}>知道了</Button>
       </DialogFooter>
@@ -568,9 +570,9 @@ function TpSlForm() {
         <div className="field"><span>最新价</span><b className="num">{fmtPrice(p, base)}</b></div>
         <div className="field"><span>开仓均价</span><b className="num">{P ? fmtPrice(P.entry, base) : "—"}</b></div>
         <Label className="mt-2 block">止盈触发价</Label>
-        <Input className="mt-1" value={tp} inputMode="decimal" onChange={(e) => setTp(e.target.value)} />
+        <Input className="mt-1" value={tp} inputMode="decimal" onChange={(e) => setTp(filterDecimal(e.target.value))} />
         <Label className="mt-3 block">止损触发价</Label>
-        <Input className="mt-1" value={sl} inputMode="decimal" onChange={(e) => setSl(e.target.value)} />
+        <Input className="mt-1" value={sl} inputMode="decimal" onChange={(e) => setSl(filterDecimal(e.target.value))} />
         <p className="hint">按现在的仓位估算：止盈 {est(tpReal)}，止损 {est(slReal)}（已扣平仓手续费，没算滑点）</p>
         <DialogFooter className="flex-row-reverse justify-start">
           <Button
@@ -606,7 +608,7 @@ function SpeedForm() {
           <DialogDescription>每根 K 线停多少秒。最快 {SPEED_MIN} 秒，最慢 {SPEED_MAX} 秒，可以填小数。</DialogDescription>
         </DialogHeader>
         <div className="relative">
-          <Input value={v} autoFocus inputMode="decimal" className="h-8 bg-panel pr-14" onChange={(e) => setV(e.target.value)} />
+          <Input value={v} autoFocus inputMode="decimal" className="h-8 bg-panel pr-14" onChange={(e) => setV(filterDecimal(e.target.value))} />
           <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-[12px] text-fg-3">秒/根</span>
         </div>
         <DialogFooter className="flex-row-reverse justify-start">

@@ -59,3 +59,17 @@ export function blindBaseOf(bars: { c: number }[], ctx: number, done: boolean) {
   const c = bars[ctx - 1]?.c;
   return c > 0 ? c : null;
 }
+
+/** Digits + at most one decimal point; strips letters and other junk (iPad keyboard). */
+export function filterDecimal(raw: string) {
+  let out = "";
+  let dot = false;
+  for (const ch of raw) {
+    if (ch >= "0" && ch <= "9") out += ch;
+    else if (ch === "." && !dot) {
+      out += ch;
+      dot = true;
+    }
+  }
+  return out;
+}
