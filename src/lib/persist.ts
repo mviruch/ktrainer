@@ -1,7 +1,7 @@
 import { FIXED, IV_OK, LEV_MAX, SPEED_MAX, SPEED_MIN } from "./constants";
 import { store } from "./store";
-import { defaultParams, defOf, type IndInst, type IndKind } from "./indicators";
-import type { Account, Anchor, Bar, Config, Drawing, Frame, Interval, OrderTab, Pool, Pos, Round, RoundLog, RunLog } from "./types";
+import { defaultParams, defOf, styleOf, type IndInst, type IndKind, type IndStyle } from "./indicators";
+import type { Account, Anchor, Bar, Config, Drawing, DrawStyle, Frame, Interval, OrderTab, Pool, Pos, Round, RoundLog, RunLog } from "./types";
 
 function isPool(v: string): v is Pool {
   return v === "btc" || v === "btceth" || v === "top30" || v === "top100";
@@ -195,16 +195,33 @@ function anchorOk(v: unknown): v is Anchor {
   return Number.isFinite(a.time) && Number.isFinite(a.price);
 }
 
+function styleOk(v: unknown): DrawStyle | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const s = v as DrawStyle;
+  if (typeof s.color !== "string" || !s.color) return undefined;
+  const width = s.width === 1 || s.width === 2 || s.width === 3 ? s.width : 2;
+  const lineStyle = s.lineStyle === "dashed" || s.lineStyle === "dotted" ? s.lineStyle : "solid";
+  const fill = s.fill !== false;
+  let fillOpacity = Number(s.fillOpacity);
+  if (!Number.isFinite(fillOpacity)) fillOpacity = 0.18;
+  fillOpacity = Math.min(0.4, Math.max(0.05, fillOpacity));
+  const fillColor = typeof s.fillColor === "string" && s.fillColor ? s.fillColor : undefined;
+  return { color: s.color, width, lineStyle, fill, fillOpacity, fillColor };
+}
+
 function unpackDrawings(raw: unknown): Drawing[] {
   if (!Array.isArray(raw)) return [];
   const out: Drawing[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
-    const d = item as Drawing;
+    const d = item as Drawing & { style?: unknown };
     const id = out.length + 1;
-    if (d.kind === "hline" && Number.isFinite(d.price)) out.push({ id, kind: "hline", price: d.price });
+    const style = styleOk(d.style);
+    if (d.kind === "hline" && Number.isFinite(d.price)) out.push({ id, kind: "hline", price: d.price, ...(style ? { style } : {}) });
     else if ((d.kind === "trend" || d.kind === "ray" || d.kind === "fib") && anchorOk(d.a) && anchorOk(d.b))
-      out.push({ id, kind: d.kind, a: d.a, b: d.b });
+      out.push({ id, kind: d.kind, a: d.a, b: d.b, ...(style ? { style } : {}) });
+    else if (d.kind === "channel" && anchorOk(d.a) && anchorOk(d.b) && anchorOk(d.c))
+      out.push({ id, kind: "channel", a: d.a, b: d.b, c: d.c, ...(style ? { style } : {}) });
   }
   return out;
 }
@@ -218,6 +235,7 @@ type SavedInd = {
   slow?: number;
   signal?: number;
   params?: Record<string, number>;
+  style?: IndStyle;
 };
 
 export function loadInds(): IndInst[] {
@@ -235,7 +253,7 @@ export function loadInds(): IndInst[] {
         const value = row.params[field.key];
         if (Number.isFinite(value)) params[field.key] = value;
       }
-      out.push({ id: row.id, kind: def.kind, params });
+      out.push({ id: row.id, kind: def.kind, params, style: styleOf({ id: row.id, kind: def.kind, style: row.style }) });
       next = Math.max(next, row.id + 1);
       continue;
     }
@@ -251,7 +269,8 @@ export function loadInds(): IndInst[] {
       const value = row[from];
       if (typeof value === "number" && value > 0 && key in params) params[key] = Math.round(value);
     }
-    out.push({ id: next++, kind: def.kind as IndKind, params });
+    const id = next++;
+    out.push({ id, kind: def.kind as IndKind, params, style: styleOf({ id, kind: def.kind }) });
   }
   return out;
 }

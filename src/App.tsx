@@ -5,11 +5,13 @@ import { Side } from "@/components/result-panel";
 import { ActionSheets, RouteSheets } from "@/components/sheets";
 import { Stage } from "@/components/stage";
 import { TrainerProvider, useTrainer } from "@/state/trainer";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function App() {
   return (
     <BrowserRouter>
       <TrainerProvider>
+        <TooltipProvider>
         <Routes>
           <Route element={<Shell />}>
             <Route index element={null} />
@@ -19,6 +21,7 @@ export function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
+        </TooltipProvider>
       </TrainerProvider>
     </BrowserRouter>
   );
@@ -70,7 +73,7 @@ function Hotkeys() {
         if (routed) nav("/");
         return;
       }
-      if (t.dialog || routed) return;
+      if (t.dialog || routed || document.querySelector("[role=dialog]")) return;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
       if (e.code === "Space") {
         e.preventDefault();

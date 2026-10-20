@@ -72,11 +72,31 @@ export type Round = {
 };
 
 export type Anchor = { time: number; price: number };
-export type DrawKind = "trend" | "ray" | "hline" | "fib";
+export type DrawKind = "trend" | "ray" | "hline" | "fib" | "channel";
+export type DrawLineStyle = "solid" | "dashed" | "dotted";
+
+/** Style for drawings (channel panel). Candle up/down colors never remap these. */
+export type DrawStyle = {
+  color: string;
+  width: 1 | 2 | 3;
+  lineStyle: DrawLineStyle;
+  fill: boolean;
+  fillOpacity: number;
+  fillColor?: string;
+};
+
+export const DEFAULT_CHANNEL_STYLE: DrawStyle = {
+  color: "#2962FF",
+  width: 2,
+  lineStyle: "solid",
+  fill: true,
+  fillOpacity: 0.18,
+};
 
 export type Drawing =
-  | { id: number; kind: "hline"; price: number }
-  | { id: number; kind: Exclude<DrawKind, "hline">; a: Anchor; b: Anchor };
+  | { id: number; kind: "hline"; price: number; style?: DrawStyle }
+  | { id: number; kind: "trend" | "ray" | "fib"; a: Anchor; b: Anchor; style?: DrawStyle }
+  | { id: number; kind: "channel"; a: Anchor; b: Anchor; c: Anchor; style?: DrawStyle };
 
 export type Config = {
   pool: Pool;

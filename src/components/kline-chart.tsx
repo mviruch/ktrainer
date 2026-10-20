@@ -25,6 +25,7 @@ import { DrawPrimitive } from "@/components/draw-primitive";
 import { NowPrimitive } from "@/components/now-primitive";
 import { paneOrder, type PaneBox, type Plot } from "@/lib/indicators";
 import type { Anchor, Drawing } from "@/lib/types";
+import type { Tool } from "@/components/chart-tools";
 
 type Props = {
   model: ChartModel | null;
@@ -36,14 +37,66 @@ type Props = {
   priceBase: number | null;
   drawings: Drawing[];
   draft: Drawing | null;
+  selectedId?: number | null;
+  tool?: Tool;
   plots: Plot[];
+  /** Sub-pane display mode keyed by Plot.pane ("collapsed" persisted per instance, "max" transient). */
+  paneModes?: Record<string, "collapsed" | "max">;
   onPanes: (boxes: PaneBox[]) => void;
   onPick: (anchor: Anchor) => void;
   onHover: (anchor: Anchor | null) => void;
+  onSelect?: (id: number | null) => void;
+  onUpdateDrawing?: (d: Drawing) => void;
+  onOpenStyle?: (id: number) => void;
   bindFit: (fn: (() => void) | null) => void;
 };
 
 type BarApi = ISeriesApi<"Candlestick">;
+
+/**
+ * Root cause of the「MACD 只有 20px」bug: IPaneApi.setHeight() spreads the delta over *all* other panes
+ * (including other sub-panes) using their current — often not yet laid out — heights, and it clamps to the
+ * library's 30px minimum. Setting panes one by one therefore squeezed earlier sub-panes. Instead, compute
+ * every pane's pixel height at once and set stretch factors (relative weights) directly.
+ * total = whole pane area (all panes, excluding the time axis).
+ */
+function applyPaneHeights(a: { chart: IChartApi }, plots: Plot[], modes: Record<string, string>, el: HTMLElement | null) {
+  const keys = paneOrder(plots);
+  const panes = a.chart.panes();
+  if (panes.length < 2 || keys.length !== panes.length) return;
+  let total = panes.reduce((sum, pane) => sum + pane.getHeight(), 0);
+  if (!(total > 0)) total = (el?.clientHeight ?? 600) - a.chart.timeScale().height();
+  const sub = keys.map((k, i) => {
+    if (i === 0) return 0;
+    const tall = plots.some((item) => item.pane === k && item.style === "hist");
+    if (modes[k] === "collapsed") return 26;
+    if (modes[k] === "max") return Math.max(26, Math.round(Math.min(total * 0.6, total - 200)));
+    return tall ? 112 : 88;
+  });
+  const main = Math.max(60, total - sub.reduce((x, y) => x + y, 0));
+  panes.forEach((pane, i) => pane.setStretchFactor(i === 0 ? main : sub[i]));
+  keys.forEach((k, i) => {
+    if (i === 0) return;
+    // Collapsed: title bar only — no axis ticks. (visible:false on a non-first pane's scale throws
+    // "Value is null" inside lightweight-charts' size adjust, so blank the text/ticks instead.)
+    const c = modes[k] === "collapsed";
+    a.chart.priceScale("right", i).applyOptions({ textColor: c ? "rgba(0,0,0,0)" : "#9598A1", ticksVisible: !c });
+  });
+}
+
+function lastLive(m: ChartModel): number | null {
+  if (!m.live) return null;
+  for (let i = m.candles.length - 1; i >= 0; i--) if (!m.candles[i].faded) return m.candles[i].close;
+  return null;
+}
+
+type Overlay = {
+  mask: { left: number; width: number } | null;
+  tags: { id: string; y: number; text: string; color: string }[];
+  height?: number;
+  /** Liquidation right-axis tag (library price-line labels can't be offset, so it's DOM). */
+  liq?: { y: number; left: number; width: number; text: string } | null;
+};
 
 type IndHandle = { id: string; series: ISeriesApi<SeriesType, Time> };
 
@@ -57,6 +110,7 @@ type Api = {
   now: NowPrimitive;
   indSeries: IndHandle[];
   indKey: string;
+  paneKey: string;
 };
 
 /** Axis / crosshair time in Asia/Shanghai (北京时间), matching result panel. */
@@ -73,7 +127,7 @@ function fmtAxis(time: Time) {
   return `${m}-${day} ${hh}:${mm}`;
 }
 
-const lineStyle = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.SparseDotted };
+const lineStyle = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted, sparse: LineStyle.SparseDotted };
 
 function measurePanes(chart: IChartApi, plots: Plot[]): PaneBox[] {
   const keys = paneOrder(plots);
@@ -131,10 +185,16 @@ export function KlineChart({
   priceBase,
   drawings,
   draft,
+  selectedId = null,
+  tool = "cursor",
   plots,
+  paneModes,
   onPanes,
   onPick,
   onHover,
+  onSelect,
+  onUpdateDrawing,
+  onOpenStyle,
   bindFit,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -145,6 +205,73 @@ export function KlineChart({
   const ignore = useRef(false);
   const priceDrag = useRef(false);
   const prev = useRef({ session: -1, peek: -1, cursor: -1, view: "", blind: null as boolean | null });
+  const paneModesRef = useRef(paneModes);
+  paneModesRef.current = paneModes;
+  const paneSig = JSON.stringify(paneModes ?? {});
+  const [overlay, setOverlay] = useState<Overlay>({ mask: null, tags: [] });
+  const modelRef = useRef(model);
+  modelRef.current = model;
+  useEffect(() => {
+    // DOM overlays the library can't draw: unplayed-area mask right of NOW and left-side price-line tags.
+    let raf = 0;
+    let last = "";
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const a = api.current;
+      const m = modelRef.current;
+      const el = ref.current;
+      if (!a || !m || !el) {
+        if (last !== "0") {
+          last = "0";
+          setOverlay({ mask: null, tags: [] });
+        }
+        return;
+      }
+      const ts = a.chart.timeScale();
+      const plotW = el.clientWidth - a.chart.priceScale("right").width();
+      const plotH = a.chart.panes()[0]?.getHeight() ?? el.clientHeight;
+      let mask: Overlay["mask"] = null;
+      if (m.nowTime != null) {
+        const x = ts.timeToCoordinate(m.nowTime as UTCTimestamp);
+        if (x != null) {
+          const left = Math.max(0, x + 3);
+          if (left < plotW) mask = { left, width: plotW - left };
+        }
+      }
+      const tags: Overlay["tags"] = [];
+      for (const l of m.lines) {
+        if (!l.label) continue;
+        const y = a.bars.priceToCoordinate(l.price);
+        if (y == null || y < 8 || y > plotH - 8) continue;
+        tags.push({ id: l.id, y: Math.round(y), text: l.label, color: l.color });
+      }
+      let liq: Overlay["liq"] = null;
+      const lq = m.lines.find((l) => l.id === "liq");
+      if (lq) {
+        const y0 = a.bars.priceToCoordinate(lq.price);
+        let y: number = y0 ?? -1;
+        if (y0 != null && y >= 8 && y <= plotH - 8) {
+          // Position tag wins: if the entry tag (avg) or last-price tag overlaps, nudge liq by half a tag height (9px).
+          const TAG = 18;
+          const others = [m.lines.find((l) => l.id === "avg")?.price, lastLive(m)]
+            .filter((v): v is number => v != null)
+            .map((v) => a.bars.priceToCoordinate(v))
+            .filter((v): v is NonNullable<typeof v> => v != null);
+          for (const oy of others) {
+            if (Math.abs(oy - y0) < TAG) y = y0 + (y0 <= oy ? -TAG / 2 : TAG / 2);
+          }
+          liq = { y: Math.round(y), left: plotW, width: a.chart.priceScale("right").width(), text: fmtNum(lq.price, m.blind) };
+        }
+      }
+      const key = JSON.stringify([mask && Math.round(mask.left), mask && Math.round(mask.width), plotH, tags, liq]);
+      if (key !== last) {
+        last = key;
+        setOverlay({ mask, tags, height: plotH, liq } as Overlay);
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   const [edgeNote, setEdgeNote] = useState<{ dir: "up" | "down"; label: string; color: string } | null>(null);
   const liqEdgeRef = useRef<{ price: number; label: string; color: string; lo: number; hi: number } | null>(null);
   const pickRef = useRef(onPick);
@@ -152,12 +279,26 @@ export function KlineChart({
   const baseRef = useRef(priceBase);
   const panesRef = useRef(onPanes);
   const plotsRef = useRef(plots);
+  const selectRef = useRef(onSelect);
+  const updateRef = useRef(onUpdateDrawing);
+  const styleRef = useRef(onOpenStyle);
+  const toolRef = useRef(tool);
+  const drawingsRef = useRef(drawings);
+  const selectedRef = useRef(selectedId);
+  const dragRef = useRef<null | { id: number; handle: "a" | "b" | "c" }>(null);
+  const suppressClickRef = useRef(false);
   useEffect(() => {
     pickRef.current = onPick;
     hoverRef.current = onHover;
     baseRef.current = priceBase;
     panesRef.current = onPanes;
     plotsRef.current = plots;
+    selectRef.current = onSelect;
+    updateRef.current = onUpdateDrawing;
+    styleRef.current = onOpenStyle;
+    toolRef.current = tool;
+    drawingsRef.current = drawings;
+    selectedRef.current = selectedId;
   });
 
   // TradingView dark defaults: teal/red. greenUp=false swaps for China-style (red up / teal down).
@@ -171,16 +312,17 @@ export function KlineChart({
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "#131722" },
-        textColor: "#787B86",
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+        textColor: "#9598A1",
+        fontFamily: '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
         fontSize: 11,
         attributionLogo: false,
+        panes: { separatorColor: "#363A45", separatorHoverColor: "#2A2E39", enableResize: true },
       },
       grid: {
-        vertLines: { color: "rgba(42, 46, 57, 0.6)" },
-        horzLines: { color: "rgba(42, 46, 57, 0.6)" },
+        vertLines: { color: "#1E222D" },
+        horzLines: { color: "#1E222D" },
       },
-      rightPriceScale: { borderColor: "#2A2E39", borderVisible: true, entireTextOnly: true },
+      rightPriceScale: { borderColor: "#2A2E39", borderVisible: true, entireTextOnly: true, minimumWidth: 60 },
       timeScale: {
         borderColor: "#2A2E39",
         borderVisible: true,
@@ -193,13 +335,13 @@ export function KlineChart({
         mode: CrosshairMode.Magnet,
         vertLine: {
           width: 1,
-          color: "#9598A1",
+          color: "#5D606B",
           style: LineStyle.Dashed,
           labelBackgroundColor: "#2A2E39",
         },
         horzLine: {
           width: 1,
-          color: "#9598A1",
+          color: "#5D606B",
           style: LineStyle.Dashed,
           labelBackgroundColor: "#2A2E39",
         },
@@ -232,13 +374,36 @@ export function KlineChart({
     bars.attachPrimitive(draw);
     bars.attachPrimitive(now);
     const onClick = (param: MouseEventParams<Time>) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
+      if (dragRef.current) return;
+      if (toolRef.current === "cursor") {
+        if (!param.point || param.paneIndex) {
+          selectRef.current?.(null);
+          return;
+        }
+        const hit = draw.pickAt(param.point.x, param.point.y);
+        selectRef.current?.(hit ? hit.id : null);
+        return;
+      }
       const anchor = readAnchor(chart, bars, param, baseRef.current);
       if (anchor) pickRef.current(anchor);
+    };
+    const onDblClick = (param: MouseEventParams<Time>) => {
+      if (toolRef.current !== "cursor" || !param.point || param.paneIndex) return;
+      const hit = draw.pickAt(param.point.x, param.point.y);
+      if (hit) {
+        const shape = drawingsRef.current.find((d) => d.id === hit.id);
+        if (shape?.kind === "channel") styleRef.current?.(shape.id);
+      }
     };
     const onMove = (param: MouseEventParams<Time>) => {
       hoverRef.current(readAnchor(chart, bars, param, baseRef.current));
     };
     chart.subscribeClick(onClick);
+    chart.subscribeDblClick(onDblClick);
     chart.subscribeCrosshairMove(onMove);
     const refreshLiqEdge = () => {
       const live = api.current;
@@ -272,23 +437,58 @@ export function KlineChart({
       pin.current = range.to >= last - 0.5;
       requestAnimationFrame(refreshLiqEdge);
     });
+    const mediaPoint = (ev: PointerEvent) => {
+      const rect = el.getBoundingClientRect();
+      return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+    };
     const onPointerDown = (ev: PointerEvent) => {
       const rect = el.getBoundingClientRect();
       const scaleW = Math.max(bars.priceScale().width(), 48);
-      if (ev.clientX >= rect.right - scaleW) priceDrag.current = true;
+      if (ev.clientX >= rect.right - scaleW) {
+        priceDrag.current = true;
+        return;
+      }
+      if (toolRef.current !== "cursor" || selectedRef.current == null) return;
+      const pt = mediaPoint(ev);
+      const hit = draw.pickAt(pt.x, pt.y);
+      if (hit?.kind === "handle" && hit.id === selectedRef.current) {
+        dragRef.current = { id: hit.id, handle: hit.handle };
+        suppressClickRef.current = true;
+        chart.applyOptions({ handleScroll: false, handleScale: false });
+        ev.preventDefault();
+      }
     };
-    const onPointerMove = () => {
+    const onPointerMove = (ev: PointerEvent) => {
       if (priceDrag.current) refreshLiqEdge();
+      const drag = dragRef.current;
+      if (!drag) return;
+      const shape = drawingsRef.current.find((d) => d.id === drag.id);
+      if (!shape || shape.kind !== "channel") return;
+      const pt = mediaPoint(ev);
+      const anchor = draw.anchorAt(pt.x, pt.y);
+      if (!anchor) return;
+      let next: Drawing = shape;
+      if (drag.handle === "a") next = { ...shape, a: anchor };
+      else if (drag.handle === "b") next = { ...shape, b: anchor };
+      else next = { ...shape, c: anchor };
+      // Keep local drawings ref in sync for smooth drag before React re-renders.
+      drawingsRef.current = drawingsRef.current.map((d) => (d.id === next.id ? next : d));
+      draw.sync(drawingsRef.current, null, baseRef.current, selectedRef.current);
+      updateRef.current?.(next);
     };
     const onPointerUp = () => {
       if (priceDrag.current) requestAnimationFrame(refreshLiqEdge);
       priceDrag.current = false;
+      if (dragRef.current) {
+        dragRef.current = null;
+        chart.applyOptions({ handleScroll: true, handleScale: true });
+      }
     };
     el.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerUp);
-    api.current = { chart, bars, volume, markers, lines: [], draw, now, indSeries: [], indKey: "" };
+    api.current = { chart, bars, volume, markers, lines: [], draw, now, indSeries: [], indKey: "", paneKey: "" };
     return () => {
       el.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointermove", onPointerMove);
@@ -514,8 +714,8 @@ export function KlineChart({
   }, [model, sessionKey, peekKey, cursor, viewKey, up, down]);
 
   useEffect(() => {
-    api.current?.draw.sync(drawings, draft, priceBase);
-  }, [drawings, draft, priceBase]);
+    api.current?.draw.sync(drawings, draft, priceBase, selectedId);
+  }, [drawings, draft, priceBase, selectedId]);
 
   useEffect(() => {
     const a = api.current;
@@ -532,12 +732,10 @@ export function KlineChart({
           if (have == null) {
             pane = a.chart.panes().length;
             a.chart.addPane();
-            const tall = plots.some((item) => item.pane === p.pane && item.style === "hist");
-            a.chart.panes()[pane]?.setHeight(tall ? 112 : 88);
             paneOf.set(p.pane, pane);
           } else pane = have;
         }
-        const common = { priceLineVisible: false, lastValueVisible: p.style === "line", title: "" };
+        const common = { priceLineVisible: false, lastValueVisible: p.style === "line" && p.pane !== "price" && !p.id.endsWith(":zero"), title: "" };
         const series: ISeriesApi<SeriesType, Time> =
           p.style === "hist"
             ? a.chart.addSeries(HistogramSeries, common, pane)
@@ -546,24 +744,43 @@ export function KlineChart({
       });
       a.indKey = key;
     }
+    const modesNow = paneModesRef.current ?? {};
     for (const p of plots) {
       const handle = a.indSeries.find((item) => item.id === p.id);
       if (!handle) continue;
       const rows = p.points.map((pt) => ({ time: pt.time as UTCTimestamp, value: pt.value, color: pt.color }));
       handle.series.setData(rows);
+      if (p.style === "line") {
+        handle.series.applyOptions({
+          color: p.color,
+          lineWidth: p.width ?? 1,
+          lineStyle: lineStyle[p.dash ?? "solid"],
+          visible: p.visible !== false && modesNow[p.pane] !== "collapsed",
+        });
+      } else handle.series.applyOptions({ visible: p.visible !== false && modesNow[p.pane] !== "collapsed" });
+    }
+    // Sub-pane heights: only re-applied when panes were rebuilt or a mode changed, so user drags survive.
+    const keys = paneOrder(plots);
+    const modes = paneModesRef.current ?? {};
+    const paneKey = a.indKey + "#" + keys.map((k) => `${k}:${modes[k] ?? ""}`).join(",");
+    if (paneKey !== a.paneKey) {
+      a.paneKey = paneKey;
+      applyPaneHeights(a, plots, modes, ref.current);
     }
     const frame = requestAnimationFrame(() => {
       const live = api.current;
       if (live) panesRef.current(measurePanes(live.chart, plots));
     });
     return () => cancelAnimationFrame(frame);
-  }, [plots]);
+  }, [plots, paneSig]);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const watch = new ResizeObserver(() => {
       const live = api.current;
+      if (live && paneModesRef.current && Object.values(paneModesRef.current).includes("max"))
+        applyPaneHeights(live, plotsRef.current, paneModesRef.current, ref.current);
       if (live) panesRef.current(measurePanes(live.chart, plotsRef.current));
     });
     watch.observe(el);
@@ -584,7 +801,35 @@ export function KlineChart({
 
   return (
     <div className="relative h-full w-full">
-      <div ref={ref} className="h-full w-full" />
+      <div ref={ref} className={model?.blind ? "h-[calc(100%-30px)] w-full" : "h-full w-full"} />
+      {model?.blind ? (
+        <div className="absolute inset-x-0 bottom-0 flex h-[30px] items-center border-t border-line pl-4 text-[11px] text-fg-3">
+          时间轴已屏蔽 · 揭盲后显示
+        </div>
+      ) : null}
+      {overlay.mask ? (
+        <div
+          className="unplayed-mask pointer-events-none absolute top-0 z-[2] bg-[#1E222D40]"
+          style={{ left: overlay.mask.left, width: overlay.mask.width, height: overlay.height }}
+        />
+      ) : null}
+      {overlay.liq ? (
+        <span
+          className="liq-axis-tag num pointer-events-none absolute z-[3] -translate-y-1/2 text-center text-[11px] leading-[18px] font-medium text-[#131722]"
+          style={{ top: overlay.liq.y, left: overlay.liq.left, width: overlay.liq.width, background: "#F7A600" }}
+        >
+          {overlay.liq.text}
+        </span>
+      ) : null}
+      {overlay.tags.map((tag) => (
+        <span
+          key={tag.id}
+          className="line-tag num pointer-events-none absolute left-1.5 z-[3] -translate-y-1/2 rounded-[3px] px-1.5 text-[10px] leading-4 font-medium whitespace-nowrap"
+          style={{ top: tag.y, color: tag.color, background: `color-mix(in srgb, ${tag.color} 20%, #131722)`, border: `1px solid color-mix(in srgb, ${tag.color} 45%, transparent)` }}
+        >
+          {tag.text}
+        </span>
+      ))}
       {edgeNote ? (
         <div
           className={`price-edge-note ${edgeNote.dir === "up" ? "top" : "bot"}`}

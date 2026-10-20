@@ -1,5 +1,5 @@
-import { liqPrice } from "./engine";
-import { blindBaseOf, displayPrice } from "./format";
+import { liqPrice, priceNow, uPnl } from "./engine";
+import { blindBaseOf, displayPrice, fmtNum, sgnU, uFmt } from "./format";
 import { bucketOpen, chartSlice } from "./frames";
 import { IV_MS } from "./constants";
 import type { Round, Side } from "./types";
@@ -20,9 +20,11 @@ export type LinePoint = {
   price: number;
   color: string;
   title: string;
-  style: "solid" | "dashed" | "dotted";
+  style: "solid" | "dashed" | "dotted" | "sparse";
   /** Show price on the right axis. Prefer one label (entry); others use title only. */
   axisLabel?: boolean;
+  /** Left-side DOM tag text (design: 「多 5x · 均价 … · 盈亏」「强平」「限价买 · 数量」). */
+  label?: string;
 };
 
 export type MarkPoint = { time: number; side: Side; color: string };
@@ -88,26 +90,28 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
     lines.push({
       id: "avg",
       price: px(P.entry),
-      color: "#787B86",
-      title: P.side > 0 ? "多" : "空",
+      color: P.side > 0 ? up : down,
+      title: "",
       style: "solid",
       axisLabel: true,
+      label: `${P.side > 0 ? "多" : "空"} ${P.lev}x · 均价 ${fmtNum(px(P.entry), blind)} · ${sgnU(uPnl(round, priceNow(round)))}`,
     });
     const lq = liqPrice(round);
     // No axis label — far liq stacks / vanishes; chart hides off-range and shows an edge note.
-    if (lq) lines.push({ id: "liq", price: px(lq), color: "#D07A2E", title: "强", style: "dashed", axisLabel: false });
-    if (P.tp) lines.push({ id: "tp", price: px(P.tp), color: up, title: "盈", style: "dashed", axisLabel: false });
-    if (P.sl) lines.push({ id: "sl", price: px(P.sl), color: down, title: "损", style: "dashed", axisLabel: false });
+    if (lq) lines.push({ id: "liq", price: px(lq), color: "#F7A600", title: "", style: "dashed", axisLabel: false, label: "强平" });
+    if (P.tp) lines.push({ id: "tp", price: px(P.tp), color: up, title: "", style: "sparse", axisLabel: false, label: "止盈" });
+    if (P.sl) lines.push({ id: "sl", price: px(P.sl), color: down, title: "", style: "sparse", axisLabel: false, label: "止损" });
   }
   if (!round.done) {
     for (const o of round.orders) {
       lines.push({
         id: "o" + o.id,
         price: px(o.price),
-        color: o.side > 0 ? "#2F86C0" : "#9B51E0",
-        title: o.side > 0 ? "买" : "卖",
-        style: "dotted",
-        axisLabel: false,
+        color: "#B39DDB",
+        title: "",
+        style: "dashed",
+        axisLabel: true,
+        label: `${o.side > 0 ? "限价买" : "限价卖"} · ${uFmt(o.qty * o.price, 0)} U`,
       });
     }
   }

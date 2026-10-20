@@ -38,10 +38,28 @@ export type IndDef = {
   fields: IndField[];
 };
 
+export type LineDash = "solid" | "dashed" | "dotted";
+export type LineCfg = { visible: boolean; color: string; width: 1 | 2 | 3; dash: LineDash };
+export type IndStyle = {
+  /** Legend eye: hide every series of this instance (legend row stays). */
+  hidden: boolean;
+  /** Sub-pane collapsed to its title bar. */
+  collapsed: boolean;
+  lines: Record<string, LineCfg>;
+  histUp: string;
+  histDown: string;
+  /** 0–1, default 0.55 */
+  histOpacity: number;
+  /** 柱状图颜色跟随涨跌配色：红涨绿跌时对调 histUp / histDown */
+  histFollow: boolean;
+};
+
 export type IndInst = {
   id: number;
   kind: IndKind;
   params: Record<string, number>;
+  /** Optional for old saved rows; read through styleOf() which fills palette defaults. */
+  style?: IndStyle;
 };
 
 export type PlotPoint = { time: number; value: number; color?: string };
@@ -53,6 +71,9 @@ export type Plot = {
   color: string;
   style: "line" | "hist";
   points: PlotPoint[];
+  width?: 1 | 2 | 3;
+  dash?: LineDash;
+  visible?: boolean;
 };
 
 export type PaneBox = { pane: string; top: number };
@@ -118,6 +139,68 @@ export const IND_CATALOG: IndDef[] = [
 ];
 
 const PALETTE = ["#2F6F9F", "#B7800F", "#7A5EA7", "#C46B4A", "#1E7A62", "#3E6B8A"];
+export const IND_COLORS = PALETTE;
+export const HIST_UP = "#1E9468";
+export const HIST_DOWN = "#CC4444";
+export const HIST_NEUTRAL = "#8A939D";
+
+export function lineSlots(kind: IndKind): { key: string; label: string }[] {
+  if (kind === "BBANDS") return [{ key: "up", label: "上轨" }, { key: "mid", label: "中轨" }, { key: "lo", label: "下轨" }];
+  if (kind === "MACD") return [{ key: "line", label: "MACD" }, { key: "sig", label: "信号线" }, { key: "zero", label: "零轴" }];
+  if (kind === "STOCH") return [{ key: "k", label: "K" }, { key: "d", label: "D" }];
+  return [{ key: "line", label: "线" }];
+}
+
+export function hasHist(kind: IndKind) {
+  return kind === "MACD";
+}
+
+/** Defaults reproduce the pre-style rendering exactly (palette colour by id, width 1, solid). */
+export function defaultStyle(inst: Pick<IndInst, "id" | "kind">): IndStyle {
+  const base = indColor(inst);
+  const second = base === "#B7800F" ? "#2F6F9F" : "#B7800F";
+  const lines: Record<string, LineCfg> = {};
+  lineSlots(inst.kind).forEach((slot, i) => {
+    lines[slot.key] =
+      slot.key === "zero"
+        ? { visible: true, color: HIST_NEUTRAL, width: 1, dash: "dashed" }
+        : { visible: true, color: i === 1 && inst.kind !== "BBANDS" ? second : base, width: 1, dash: "solid" };
+  });
+  return { hidden: false, collapsed: false, lines, histUp: HIST_UP, histDown: HIST_DOWN, histOpacity: 0.55, histFollow: true };
+}
+
+const isHex = (v: unknown): v is string => typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
+
+/** Merge a (possibly partial / untrusted) saved style over palette defaults. */
+export function styleOf(inst: Pick<IndInst, "id" | "kind" | "style">): IndStyle {
+  const def = defaultStyle(inst);
+  const raw = (inst.style ?? {}) as Partial<IndStyle>;
+  const lines: Record<string, LineCfg> = {};
+  for (const key of Object.keys(def.lines)) {
+    const d = def.lines[key];
+    const r = (raw.lines?.[key] ?? {}) as Partial<LineCfg>;
+    lines[key] = {
+      visible: typeof r.visible === "boolean" ? r.visible : d.visible,
+      color: isHex(r.color) ? r.color : d.color,
+      width: r.width === 1 || r.width === 2 || r.width === 3 ? r.width : d.width,
+      dash: r.dash === "solid" || r.dash === "dashed" || r.dash === "dotted" ? r.dash : d.dash,
+    };
+  }
+  return {
+    hidden: typeof raw.hidden === "boolean" ? raw.hidden : def.hidden,
+    collapsed: typeof raw.collapsed === "boolean" ? raw.collapsed : def.collapsed,
+    lines,
+    histUp: isHex(raw.histUp) ? raw.histUp : def.histUp,
+    histDown: isHex(raw.histDown) ? raw.histDown : def.histDown,
+    histOpacity: typeof raw.histOpacity === "number" && raw.histOpacity >= 0 && raw.histOpacity <= 1 ? raw.histOpacity : def.histOpacity,
+    histFollow: typeof raw.histFollow === "boolean" ? raw.histFollow : def.histFollow,
+  };
+}
+
+function alphaHex(hex: string, a: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
 
 export function defOf(kind: string) {
   return IND_CATALOG.find((d) => d.kind === kind);
@@ -144,7 +227,7 @@ export function indTitle(inst: IndInst) {
   return bits.length ? `${def.en} ${bits.join(",")}` : def.en;
 }
 
-export function indColor(inst: IndInst) {
+export function indColor(inst: Pick<IndInst, "id" | "kind">) {
   if (inst.kind === "BBANDS") return "#8A939D";
   return PALETTE[Math.abs(inst.id) % PALETTE.length];
 }
@@ -252,7 +335,7 @@ function relVolume(bars: Bar[], base: number | null) {
   return bars.map((b) => b.v / avg);
 }
 
-export async function computeIndicators(bars: Bar[], insts: IndInst[], base: number | null): Promise<Plot[]> {
+export async function computeIndicators(bars: Bar[], insts: IndInst[], base: number | null, greenUp = true): Promise<Plot[]> {
   if (!bars.length || !insts.length) return [];
   const mod = await talib();
   const close = bars.map((b) => b.c);
@@ -265,6 +348,12 @@ export async function computeIndicators(bars: Bar[], insts: IndInst[], base: num
     const pane = instPane(inst);
     const color = indColor(inst);
     const price = (v: number) => shown(v, base);
+    const st = styleOf(inst);
+    const swap = st.histFollow && !greenUp;
+    const hUp = swap ? st.histDown : st.histUp;
+    const hDown = swap ? st.histUp : st.histDown;
+    const histColor = (v: number) => alphaHex(v >= 0 ? hUp : hDown, st.histOpacity);
+    const from = plots.length;
     try {
       if (inst.kind === "SMA" || inst.kind === "EMA" || inst.kind === "WMA") {
         const fn = inst.kind === "SMA" ? "TA_SMA" : inst.kind === "EMA" ? "TA_EMA" : "TA_WMA";
@@ -294,12 +383,13 @@ export async function computeIndicators(bars: Bar[], insts: IndInst[], base: num
         const macd = runTA(mod, "TA_MACD", [close], ["number", "number", "number"], [fast, slow, param(inst, "signal")], 3);
         const hist = placed(bars, macd.cols[2], macd.beg, price).map((pt) => ({
           ...pt,
-          color: pt.value >= 0 ? "rgba(30,148,104,0.55)" : "rgba(204,68,68,0.55)",
+          color: histColor(pt.value),
         }));
         plots.push(
           { id: `${inst.id}:hist`, inst: inst.id, pane, color: "#8A939D", style: "hist", points: hist },
           plotOf(inst, "line", pane, color, "line", bars, macd.cols[0], macd.beg, price),
           plotOf(inst, "sig", pane, color === "#B7800F" ? "#2F6F9F" : "#B7800F", "line", bars, macd.cols[1], macd.beg, price),
+          { id: `${inst.id}:zero`, inst: inst.id, pane, color: HIST_NEUTRAL, style: "line", points: hist.map((pt) => ({ time: pt.time, value: 0 })) },
         );
       } else if (inst.kind === "STOCH") {
         const out = runTA(mod, "TA_STOCH", [high, low, close], ["number", "number", "number", "number", "number"], [param(inst, "k"), param(inst, "smooth"), 0, param(inst, "d"), 0], 2);
@@ -328,6 +418,17 @@ export async function computeIndicators(bars: Bar[], insts: IndInst[], base: num
       }
     } catch {
       /* 这一条的参数算不出来就跳过，别把别的指标一起清掉。 */
+    }
+    for (let i = from; i < plots.length; i++) {
+      const plot = plots[i];
+      const slot = plot.id.slice(String(inst.id).length + 1);
+      const cfg = st.lines[slot];
+      if (cfg) {
+        plot.color = cfg.color;
+        plot.width = cfg.width;
+        plot.dash = cfg.dash;
+      }
+      plot.visible = !st.hidden && !st.collapsed && (cfg ? cfg.visible : true);
     }
   }
   return plots;

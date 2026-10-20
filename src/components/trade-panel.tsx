@@ -9,6 +9,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function TradePanel() {
   const t = useTrainer();
@@ -56,149 +58,174 @@ export function TradePanel() {
     if (tab === "limit" && !limit) setLimit(fmtPrice(p, base));
   }
 
+  const lockTip = "有持仓或挂单时不能改保证金模式和杠杆";
+  const topBtn = (label: string, cls: string, kind: "mode" | "lev") => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="flex-1" tabIndex={locked ? 0 : -1}>
+          <Button size="sm" disabled={locked} className={`w-full ${cls}`} onClick={() => t.openDialog({ kind })}>
+            {label}
+          </Button>
+        </span>
+      </TooltipTrigger>
+      {locked && <TooltipContent>{lockTip}</TooltipContent>}
+    </Tooltip>
+  );
+
   return (
-    <div>
-      <div className="tr-top">
-        <Button size="sm" disabled={locked} onClick={() => t.openDialog({ kind: "mode" })}>
-          {t.acc.mode === "cross" ? "全仓" : "逐仓"}
-        </Button>
-        <Button size="sm" disabled={locked} onClick={() => t.openDialog({ kind: "lev" })}>
-          {t.acc.lev}x
-        </Button>
-        <span className="tr-blind">盲测 · USDT 永续</span>
-      </div>
-      <Tabs value={t.tab} onValueChange={onTab}>
-        <TabsList>
-          <TabsTrigger value="market">市价</TabsTrigger>
-          <TabsTrigger value="limit">限价</TabsTrigger>
-        </TabsList>
-      </Tabs>
-      {t.tab === "limit" && (
-        <div className="tr-field">
+    <div className="flex flex-col">
+      <div className="flex flex-col gap-2.5 px-4 pt-3 pb-4">
+        <div className="flex gap-2">
+          {topBtn(t.acc.mode === "cross" ? "全仓" : "逐仓", "", "mode")}
+          {topBtn(`${t.acc.lev}x`, "num font-semibold text-liq", "lev")}
+        </div>
+        <Tabs value={t.tab} onValueChange={onTab}>
+          <TabsList className="mb-0">
+            <TabsTrigger value="market">市价</TabsTrigger>
+            <TabsTrigger value="limit">限价</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="flex justify-between text-[11px] text-fg-3">
+          <span>可用</span>
+          <b className="num font-normal text-fg-2">{uFmt(availBal(round, p))} USDT</b>
+        </div>
+        <div className={`tr-field ${t.tab === "market" ? "opacity-70" : ""}`}>
           <span>价格</span>
-          <input value={limit} inputMode="decimal" autoComplete="off" onChange={(e) => setLimit(e.target.value)} />
-          <Button variant="text" size="sm" className="text-verdict" onClick={() => setLimit(fmtPrice(p, base))}>
-            最新
-          </Button>
+          {t.tab === "limit" ? (
+            <>
+              <input value={limit} inputMode="decimal" autoComplete="off" onChange={(e) => setLimit(e.target.value)} />
+              <Button variant="link" size="xs" onClick={() => setLimit(fmtPrice(p, base))}>
+                最新
+              </Button>
+            </>
+          ) : (
+            <>
+              <input value="最新价" readOnly tabIndex={-1} className="!font-sans !text-[12px]" aria-label="市价按最新价成交" />
+              <em className="num">{fmtPrice(p, base)}</em>
+            </>
+          )}
         </div>
-      )}
-      <div className="tr-last">
-        最新价 <b className="num">{fmtPrice(p, base)}</b>
-      </div>
-      <div className="tr-field">
-        <span>数量</span>
-        <input
-          value={amt}
-          inputMode="decimal"
-          placeholder="仓位价值"
-          autoComplete="off"
-          onChange={(e) => {
-            setAmt(e.target.value);
-            setPct(0);
-          }}
-        />
-        <em>USDT</em>
-      </div>
-      <div className="tr-pctrow">
-        <Slider value={[pct]} max={100} step={1} onValueChange={([v]) => applyPct(v ?? 0)} />
-        <span className="num w-9 text-right text-[11px] text-dim">{pct}%</span>
-      </div>
-      <div className="tr-ticks">
-        {[10, 25, 50, 75, 100].map((n) => (
-          <button key={n} type="button" onClick={() => applyPct(n)}>
-            {n}%
-          </button>
-        ))}
-      </div>
-      <div className="tr-kv">
-        <span>可用</span>
-        <b>{uFmt(availBal(round, p))} USDT</b>
-      </div>
-      <Label className="mb-2 flex items-center gap-2 text-[12.5px]">
-        <Checkbox checked={tpslOn} onCheckedChange={(v) => setTpslOn(v === true)} />
-        止盈 / 止损
-      </Label>
-      {tpslOn && (
-        <>
-          <div className="tr-field">
-            <span>止盈</span>
-            <input value={tp} inputMode="decimal" placeholder="触发价" autoComplete="off" onChange={(e) => setTp(e.target.value)} />
+        <div className="tr-field">
+          <span>数量</span>
+          <input
+            value={amt}
+            inputMode="decimal"
+            placeholder="仓位价值"
+            autoComplete="off"
+            onChange={(e) => {
+              setAmt(e.target.value);
+              setPct(0);
+            }}
+          />
+          <em>USDT</em>
+        </div>
+        <div className="flex flex-col gap-1">
+          <div className="relative flex h-4 items-center">
+            <Slider value={[pct]} max={100} step={1} onValueChange={([v]) => applyPct(v ?? 0)} />
           </div>
-          <div className="tr-field">
-            <span>止损</span>
-            <input value={sl} inputMode="decimal" placeholder="触发价" autoComplete="off" onChange={(e) => setSl(e.target.value)} />
+          <div className="flex justify-between">
+            {[0, 25, 50, 75, 100].map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`num cursor-pointer text-[10px] hover:text-chalk ${pct === n && n > 0 ? "text-chalk" : "text-fg-3"}`}
+                onClick={() => applyPct(n)}
+              >
+                {n}%
+              </button>
+            ))}
           </div>
-        </>
-      )}
-      <div className="tr-btns">
-        <Button variant="buy" size="lg" className="btn-buy" onClick={() => send(1)}>
-          买入 / 做多
-        </Button>
-        <Button variant="sell" size="lg" className="btn-sell" onClick={() => send(-1)}>
-          卖出 / 做空
-        </Button>
-      </div>
-      <div className="tr-under">
-        <div className="col-span-2 text-[11px] text-dim">本单预估</div>
-        <div>
-          可开多 <b>{uFmt(maxOpen(round, 1, t.acc.lev), 0)}</b> U
         </div>
-        <div className="text-right">
-          可开空 <b>{uFmt(maxOpen(round, -1, t.acc.lev), 0)}</b> U
+        <div className="flex items-center justify-between">
+          <Label className="flex cursor-pointer items-center gap-2 text-[12px]">
+            <Checkbox checked={tpslOn} onCheckedChange={(v) => setTpslOn(v === true)} />
+            带止盈止损
+          </Label>
+          <span className="text-[11px] text-fg-3">触发价按最新价</span>
         </div>
-        <div>
-          保证金 <b>{uFmt(notional / t.acc.lev)}</b> U
-        </div>
-        <div className="text-right">
-          手续费 ≈ <b>{uFmt(notional * rate)}</b> U
-        </div>
-      </div>
-
-      <div className="tr-sec">
-        <b>持仓</b>
-      </div>
-      {!P && <div className="tr-empty">没有持仓</div>}
-      {P && (
-        <Position
-          onEdit={() => t.openDialog({ kind: "tpsl" })}
-          onClose={(f) => t.closePart(f)}
-          onReverse={t.requestReverse}
-        />
-      )}
-
-      <div className="tr-sec">
-        <b>
-          当前委托 <i>{round.orders.length ? `(${round.orders.length})` : ""}</i>
-        </b>
-        {round.orders.length > 0 && (
-          <Button variant="text" size="sm" className="text-dim hover:text-breach" onClick={t.cancelAll}>
-            全部撤销
-          </Button>
+        {tpslOn && (
+          <div className="grid grid-cols-2 gap-2">
+            <div className="tr-field">
+              <span>止盈</span>
+              <input value={tp} inputMode="decimal" placeholder="触发价" autoComplete="off" onChange={(e) => setTp(e.target.value)} />
+            </div>
+            <div className="tr-field">
+              <span>止损</span>
+              <input value={sl} inputMode="decimal" placeholder="触发价" autoComplete="off" onChange={(e) => setSl(e.target.value)} />
+            </div>
+          </div>
         )}
-      </div>
-      {round.orders.length === 0 && <div className="tr-empty">没有挂单</div>}
-      {round.orders.map((o) => (
-        <div className="tr-order" key={o.id}>
-          <span className={`tr-side ${o.side > 0 ? "l" : "s"}`}>{o.side > 0 ? "买" : "卖"}</span>
-          <span>
-            限价 <b className="num">{fmtPrice(o.price, base)}</b>
-          </span>
-          <span className="num">
-            {uFmt(o.qty * o.price, 0)} U{o.tp || o.sl ? " · 带止盈止损" : ""}
-          </span>
-          <Button variant="text" size="sm" className="grow text-verdict" onClick={() => t.cancel(o.id)}>
-            撤单
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="buy" className="btn-buy h-11 flex-col gap-0 leading-tight" onClick={() => send(1)}>
+            <span className="text-[13px]">买入 / 做多</span>
+            <span className="num text-[10px] font-normal opacity-80">可开多 {uFmt(maxOpen(round, 1, t.acc.lev), 0)} U</span>
+          </Button>
+          <Button variant="sell" className="btn-sell h-11 flex-col gap-0 leading-tight" onClick={() => send(-1)}>
+            <span className="text-[13px]">卖出 / 做空</span>
+            <span className="num text-[10px] font-normal opacity-80">可开空 {uFmt(maxOpen(round, -1, t.acc.lev), 0)} U</span>
           </Button>
         </div>
-      ))}
-
-      <div className="tr-sec">
-        <b>账户</b>
+        <div className="flex flex-col gap-1.5 rounded-[4px] bg-elevated px-3 py-2.5 text-[12px]">
+          <div className="text-[11px] text-fg-3">本单预估</div>
+          <div className="flex justify-between">
+            <span className="text-fg-2">保证金</span>
+            <b className="num font-medium">{uFmt(notional / t.acc.lev)} U</b>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-fg-2">手续费 ≈</span>
+            <b className="num font-medium">{uFmt(notional * rate)} U</b>
+          </div>
+        </div>
       </div>
-      <AccountGrid />
-      <Button className="mt-4 w-full" onClick={t.requestEnd}>
-        结束本局
-      </Button>
+
+      <section className="border-t border-line px-4 py-3">
+        <div className="tr-sec">
+          <b>持仓 {P ? <i>1</i> : null}</b>
+          {P && (
+            <Button size="xs" onClick={() => t.closePart(1)}>
+              市价全平
+            </Button>
+          )}
+        </div>
+        {!P && <div className="tr-empty">没有持仓</div>}
+        {P && <Position onEdit={() => t.openDialog({ kind: "tpsl" })} onClose={(f) => t.closePart(f)} onReverse={t.requestReverse} />}
+      </section>
+
+      <section className="border-t border-line px-4 py-3">
+        <div className="tr-sec">
+          <b>
+            当前委托 <i>{round.orders.length || ""}</i>
+          </b>
+          {round.orders.length > 0 && (
+            <Button size="xs" onClick={t.cancelAll}>
+              全部撤销
+            </Button>
+          )}
+        </div>
+        {round.orders.length === 0 && <div className="tr-empty">没有挂单</div>}
+        {round.orders.map((o) => (
+          <div className="tr-order" key={o.id}>
+            <Badge variant="pending">{o.side > 0 ? "限价买" : "限价卖"}</Badge>
+            <b className="num font-normal">{fmtPrice(o.price, base)}</b>
+            <span className="num text-fg-2">
+              · {uFmt(o.qty * o.price, 0)} U{o.tp || o.sl ? " · 带止盈止损" : ""}
+            </span>
+            <Button variant="link" size="xs" className="grow" onClick={() => t.cancel(o.id)}>
+              撤单
+            </Button>
+          </div>
+        ))}
+      </section>
+
+      <section className="border-t border-line px-4 py-3">
+        <div className="tr-sec">
+          <b>账户</b>
+        </div>
+        <AccountGrid />
+        <Button variant="danger" className="mt-3 h-9 w-full" onClick={t.requestEnd}>
+          结束本局
+        </Button>
+      </section>
     </div>
   );
 }
@@ -219,10 +246,10 @@ function Position({ onEdit, onClose, onReverse }: { onEdit: () => void; onClose:
   return (
     <div>
       <div className="tr-poshd">
-        <span className={`tr-side ${P.side > 0 ? "l" : "s"}`}>{P.side > 0 ? "多" : "空"}</span>
-        <span className="tr-tag">
-          {P.mode === "cross" ? "全仓" : "逐仓"} {P.lev}x
-        </span>
+        <Badge variant={P.side > 0 ? "up" : "down"} className={`tr-badge ${P.side > 0 ? "l" : "s"}`}>
+          {P.side > 0 ? "多" : "空"} {P.lev}x
+        </Badge>
+        <span className="text-[11px] text-fg-3">{P.mode === "cross" ? "全仓" : "逐仓"}</span>
         <b className="num" style={{ color: col }}>
           {sgnU(u)} <small>({pctFmt(im0 ? u / im0 : 0)})</small>
         </b>
@@ -252,7 +279,7 @@ function Position({ onEdit, onClose, onReverse }: { onEdit: () => void; onClose:
         </div>
         <div>
           <span>强平价</span>
-          <b className="num" style={{ color: "#B5651D" }}>
+          <b className="num" style={{ color: "var(--liq)" }}>
             {lq ? fmtPrice(lq, base) : "—"}
           </b>
         </div>
@@ -264,21 +291,21 @@ function Position({ onEdit, onClose, onReverse }: { onEdit: () => void; onClose:
           {" / "}
           <i style={{ color: "var(--down)" }}>{P.sl ? fmtPrice(P.sl, base) : "—"}</i>
         </b>
-        <Button variant="text" size="sm" className="text-verdict" onClick={onEdit}>
+        <Button variant="link" size="xs" onClick={onEdit}>
           设置
         </Button>
       </div>
       <div className="tr-closebar">
-        <Button size="sm" onClick={() => onClose(0.25)}>
+        <Button size="xs" onClick={() => onClose(0.25)}>
           平 25%
         </Button>
-        <Button size="sm" onClick={() => onClose(0.5)}>
+        <Button size="xs" onClick={() => onClose(0.5)}>
           平 50%
         </Button>
-        <Button size="sm" className="btn-solid" onClick={() => onClose(1)}>
-          市价全平
+        <Button size="xs" onClick={onEdit}>
+          止盈 / 止损
         </Button>
-        <Button size="sm" onClick={onReverse}>
+        <Button size="xs" onClick={onReverse}>
           反手
         </Button>
       </div>

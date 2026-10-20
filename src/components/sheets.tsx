@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLocation, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -7,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FEE_TAKER, FIXED, IV_CN, IV_OK, LEV_CHIPS, LEV_MAX, POOLS, SPEED_MAX, SPEED_MIN } from "@/lib/constants";
 import { availBal, opp, priceNow, slipPx, uPnl } from "@/lib/engine";
 import { bjDate, fmtPrice, parsePrice, sgnU, uFmt } from "@/lib/format";
@@ -39,7 +42,7 @@ export function RouteSheets() {
   );
 }
 
-function StatsBody({ onClose }: { onClose: () => void }) {
+function StatsBody(_props: { onClose: () => void }) {
   const t = useTrainer();
   const s = statsOf(t.log);
   function csv() {
@@ -54,59 +57,131 @@ function StatsBody({ onClose }: { onClose: () => void }) {
     );
     download("合约训练记录.csv", "\uFEFF" + lines.join("\n"), "text/csv;charset=utf-8");
   }
+  const pct = (a: number, b: number) => (b ? ((a / b) * 100).toFixed(1) + "%" : "—");
+  const tone = (v: number | null | undefined) => (v == null || v === 0 ? "" : v > 0 ? "text-up" : "text-down");
+  const kpi = (label: string, value: ReactNode, sub?: ReactNode, cls = "") => (
+    <div className="flex min-w-0 flex-col gap-1 rounded-[4px] bg-ink px-3 py-2.5">
+      <span className="text-[11px] text-fg-3">{label}</span>
+      <b className={`num truncate text-[18px] leading-6 font-semibold ${cls}`}>{value}</b>
+      {sub ? <span className="num text-[11px] text-fg-3">{sub}</span> : null}
+    </div>
+  );
+  const runN = t.acc.runN || 0;
+  const cur = runN > 0 ? statsOf(t.log.slice(-runN)) : null;
+  const runRows = [
+    ...(cur ? [{ key: "cur", label: `#${t.runs.length + 1} 进行中`, sub: `${runN}/${FIXED.runSize}`, n: cur.n, wr: pct(cur.wins, cur.traded), pnl: cur.pnl }] : []),
+    ...t.runs
+      .slice()
+      .reverse()
+      .map((r) => ({ key: String(r.idx), label: `#${r.idx} 已结束`, sub: "", n: r.n, wr: pct(r.wins, r.traded), pnl: r.pnl })),
+  ];
+  const runTable = (rows: typeof runRows) => (
+    <div className="overflow-hidden rounded-[4px] border border-line">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="pl-3">场次状态</TableHead>
+            <TableHead className="text-right">局</TableHead>
+            <TableHead className="text-right">胜率</TableHead>
+            <TableHead className="pr-3 text-right">净盈亏</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow key={r.key}>
+              <TableCell className="num pl-3">
+                {r.label}
+                {r.sub ? <span className="ml-1 text-fg-3">· {r.sub}</span> : null}
+              </TableCell>
+              <TableCell className="num text-right">{r.n}</TableCell>
+              <TableCell className="num text-right">{r.wr}</TableCell>
+              <TableCell className={`num pr-3 text-right ${tone(r.pnl)}`}>{sgnU(r.pnl)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
   return (
-    <DialogContent>
+    <DialogContent className="w-[min(640px,calc(100%-32px))]">
       <DialogHeader>
         <DialogTitle>统计</DialogTitle>
-        <DialogDescription>
-          {s.n ? `${s.n} 局（其中 ${s.traded} 局有交易）。${s.n < 40 ? "样本还少，先多打几场再下结论。" : ""}` : "还没有完成的局。"}
-        </DialogDescription>
+        <DialogDescription className="sr-only">训练统计</DialogDescription>
       </DialogHeader>
-      {s.n > 0 && (
-        <>
-          <h3 className="sheet-h">账户</h3>
-          <div className="field"><span>当前余额</span><b className="num">{uFmt(t.acc.wallet)} U</b></div>
-          <div className="field"><span>累计盈亏（已扣手续费）</span><b className="num" style={{ color: s.pnl >= 0 ? "var(--up)" : "var(--down)" }}>{sgnU(s.pnl)} U</b></div>
-          <div className="field"><span>累计手续费</span><b className="num">{uFmt(s.fees)} U{s.gross > 0 ? ` · 占毛利 ${Math.round((s.fees / s.gross) * 100)}%` : ""}</b></div>
-          <div className="field"><span>爆仓 / 被强平</span><b className="num">{t.acc.busts || 0} 次 / {s.liqs} 次</b></div>
-          <h3 className="sheet-h">每局</h3>
-          <div className="field"><span>胜率（有交易的局）</span><b className="num">{s.traded ? Math.round((s.wins / s.traded) * 100) + "%" : "—"}</b></div>
-          <div className="field"><span>平均盈利局 / 平均亏损局</span><b className="num">{s.avgW == null ? "—" : "+" + uFmt(s.avgW)} / {s.avgL == null ? "—" : "-" + uFmt(s.avgL)}</b></div>
-          <div className="field"><span>盈亏比</span><b className="num">{s.avgW != null && s.avgL ? (s.avgW / s.avgL).toFixed(2) : "—"}</b></div>
-          <div className="field"><span>利润因子</span><b className="num">{s.pf == null ? "—" : s.pf.toFixed(2)}</b></div>
-          <div className="field"><span>最好 / 最差一局</span><b className="num">{s.best == null ? "—" : sgnU(s.best)} / {s.worst == null ? "—" : sgnU(s.worst)}</b></div>
-          {s.peeked > 0 && <div className="field"><span>中途揭示答案的局</span><b className="num">{s.peeked}</b></div>}
-          <h3 className="sheet-h">按周期</h3>
-          {IV_OK.map((iv) => {
-            const rows = t.log.filter((r) => r.interval.split(",").includes(iv));
-            if (!rows.length) return null;
-            const x = statsOf(rows);
-            return (
-              <div className="field" key={iv}>
-                <span>{IV_CN[iv]}</span>
-                <b className="num">{x.n} 局 · {sgnU(x.pnl)} U{x.traded ? ` · 胜率 ${Math.round((x.wins / x.traded) * 100)}%` : ""}</b>
-              </div>
-            );
-          })}
-          {t.runs.length > 0 && <h3 className="sheet-h">场次</h3>}
-          {t.runs.slice(-12).map((r) => (
-            <div className="field" key={r.idx}>
-              <span>第 {r.idx} 场</span>
-              <b className="num">{sgnU(r.pnl)} U · 胜率 {r.traded ? Math.round((r.wins / r.traded) * 100) + "%" : "—"} · 余额 {uFmt(r.endW, 0)}</b>
+      {s.n === 0 ? (
+        <p className="py-6 text-center text-[12px] text-fg-3">还没有完成的局。</p>
+      ) : (
+        <Tabs defaultValue="all" className="flex flex-col gap-4">
+          <TabsList variant="segmented" className="grid w-full grid-cols-3">
+            <TabsTrigger value="all">总览</TabsTrigger>
+            <TabsTrigger value="iv">按周期</TabsTrigger>
+            <TabsTrigger value="runs">场次</TabsTrigger>
+          </TabsList>
+          <TabsContent value="all" className="flex flex-col gap-4">
+            <div className="grid grid-cols-4 gap-2">
+              {kpi("累计盈亏（已扣手续费）", sgnU(s.pnl), null, tone(s.pnl))}
+              {kpi("胜率（有交易的局）", pct(s.wins, s.traded), `${s.wins} / ${s.traded}`)}
+              {kpi("盈亏比", s.avgW != null && s.avgL ? (s.avgW / s.avgL).toFixed(2) : "—")}
+              {kpi("利润因子", s.pf == null ? "—" : s.pf.toFixed(2))}
+              {kpi("累计手续费", s.fees ? "-" + uFmt(s.fees) : uFmt(0), s.gross > 0 ? `占毛利 ${((s.fees / s.gross) * 100).toFixed(1)}%` : null, "text-fg-2")}
+              {kpi("最好 / 最差一局", `${s.best == null ? "—" : sgnU(s.best).replace(/\.\d+$/, "")} / ${s.worst == null ? "—" : sgnU(s.worst).replace(/\.\d+$/, "")}`)}
+              {kpi("爆仓 / 被强平", `${t.acc.busts || 0} / ${s.liqs} 次`)}
+              {kpi("看过答案", `${s.peeked} 局`)}
             </div>
-          ))}
-        </>
+            {runRows.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="text-[12px] font-medium">场次</div>
+                {runTable(runRows.slice(0, 3))}
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="iv">
+            <div className="overflow-hidden rounded-[4px] border border-line">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-3">周期</TableHead>
+                    <TableHead className="text-right">局</TableHead>
+                    <TableHead className="text-right">胜率</TableHead>
+                    <TableHead className="pr-3 text-right">净盈亏</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {IV_OK.map((iv) => {
+                    const rows = t.log.filter((r) => r.interval.split(",").includes(iv));
+                    if (!rows.length) return null;
+                    const x = statsOf(rows);
+                    return (
+                      <TableRow key={iv}>
+                        <TableCell className="pl-3">{IV_CN[iv]}</TableCell>
+                        <TableCell className="num text-right">{x.n}</TableCell>
+                        <TableCell className="num text-right">{pct(x.wins, x.traded)}</TableCell>
+                        <TableCell className={`num pr-3 text-right ${tone(x.pnl)}`}>{sgnU(x.pnl)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+          <TabsContent value="runs">{runRows.length ? runTable(runRows) : <p className="text-[12px] text-fg-3">还没有场次。</p>}</TabsContent>
+        </Tabs>
       )}
+      <p className="mt-4 text-[11px] leading-[18px] text-fg-3">
+        {s.n ? `${s.n} 局（其中 ${s.traded} 局有交易）。` : ""}
+        {s.n && s.n < 40 ? "样本还少，先多打几场再下结论。" : ""}
+        {store.persistent ? "记录保存在本机浏览器里。" : "当前环境不允许本地存储，记录只在本页有效。"}
+      </p>
       <DialogFooter>
-        <Button onClick={csv} disabled={!s.n}>导出 CSV</Button>
+        <Button variant="danger" className="mr-auto" onClick={() => t.openDialog({ kind: "wipe" })}>清空记录</Button>
         <Button
+          variant="secondary"
           disabled={!s.n}
           onClick={() => download("合约训练记录.json", JSON.stringify({ account: t.acc, runs: t.runs, rounds: t.log }, null, 2), "application/json")}
         >
           导出 JSON
         </Button>
-        <Button onClick={() => t.openDialog({ kind: "wipe" })}>清空记录</Button>
-        <Button variant="primary" className="ml-auto" onClick={onClose}>关闭</Button>
+        <Button variant="primary" onClick={csv} disabled={!s.n}>导出 CSV</Button>
       </DialogFooter>
     </DialogContent>
   );
@@ -145,14 +220,25 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
         ))}
       </div>
       <p className="hint">同一局一起看。长周期对齐到最短周期的当前时刻，没收盘的柱子只用已经走过的 K 线拼，不会把后面的价格画出来。</p>
-      <h3 className="sheet-h">显示</h3>
-      <div className="field">
-        <span>涨跌配色</span>
-        <select className="h-8 rounded-[3px] border border-line bg-ink px-2" value={green ? "1" : "0"} onChange={(e) => setGreen(e.target.value === "1")}>
-          <option value="1">绿涨红跌</option>
-          <option value="0">红涨绿跌</option>
-        </select>
-      </div>
+      <h3 className="sheet-h">涨跌配色</h3>
+      <ToggleGroup type="single" value={green ? "1" : "0"} onValueChange={(v) => v && setGreen(v === "1")} className="grid grid-cols-2 gap-2" aria-label="涨跌配色">
+        {[
+          { v: "1", label: "绿涨红跌", a: "#37a74c", b: "#cf4f5f" },
+          { v: "0", label: "红涨绿跌", a: "#cf4f5f", b: "#37a74c" },
+        ].map((o) => (
+          <ToggleGroupItem
+            key={o.v}
+            value={o.v}
+            className="h-10 justify-start gap-2 border border-line-strong px-3 data-[state=on]:border-brand data-[state=on]:bg-brand/15"
+          >
+            <span className="flex gap-0.5">
+              <i className="block h-4 w-2 rounded-[1px]" style={{ background: o.a }} />
+              <i className="block h-4 w-2 rounded-[1px]" style={{ background: o.b }} />
+            </span>
+            {o.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
       <h3 className="sheet-h">固定规则</h3>
       <div className="cfg-fixed">
         <div><span>初始本金</span><b>10,000 U，一直滚动；爆仓或手动重置才回到 1 万</b></div>
@@ -167,7 +253,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
       <Separator className="my-4" />
       <div className="field">
         <span>余额 {uFmt(t.acc.wallet)} U</span>
-        <Button size="sm" onClick={() => t.openDialog({ kind: "reset" })}>余额重置为 10,000 U</Button>
+        <Button size="sm" variant="danger" onClick={() => t.openDialog({ kind: "reset" })}>余额重置为 10,000 U</Button>
       </div>
       <p className="sheet-copy mt-2">
         {store.persistent
@@ -175,6 +261,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
           : "当前环境不允许本地存储，记录只在本页有效。"}
       </p>
       <DialogFooter>
+        <Button variant="secondary" onClick={onClose}>取消</Button>
         <Button
           variant="primary"
           onClick={() => {
@@ -188,7 +275,6 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
         >
           保存
         </Button>
-        <Button onClick={onClose}>取消</Button>
       </DialogFooter>
     </DialogContent>
   );
@@ -215,7 +301,7 @@ function HelpBody({ onClose }: { onClose: () => void }) {
       <h3 className="sheet-h">图表</h3>
       <p className="sheet-copy">滚轮缩放，拖拽平移。F 适应全部。左边可以画趋势线、射线、水平线和斐波那契，Esc 取消。图上方打开指标，按类型选，点一下加到主图或副图，参数在那张图上改。指标用 TA-Lib，只吃已经走出的 K 线。揭盲前不显示时间轴，成交量用相对均量，避免从成交量认出币种。</p>
       <DialogFooter>
-        <Button variant="primary" className="ml-auto" onClick={onClose}>知道了</Button>
+        <Button variant="primary" onClick={onClose}>知道了</Button>
       </DialogFooter>
     </DialogContent>
   );
@@ -238,19 +324,19 @@ function ReverseSheet() {
   }
   return (
     <Dialog open={open} onOpenChange={(o) => !o && t.closeDialog()}>
-      <DialogContent>
+      <DialogContent className="w-[min(400px,calc(100%-32px))]">
         <DialogHeader>
           <DialogTitle>确认反手？</DialogTitle>
-          <DialogDescription asChild>
+        </DialogHeader>
+        <DialogDescription className="mt-0 text-[13px] leading-[22px] [&>div>div+div]:mt-2.5" asChild>
             <div>
               <div>将市价平掉当前仓位并开同等大小反向仓（{sideLabel || "反向"}）。</div>
               <div>吃单万 5，带滑点；预估手续费约 <b className="num">{feeEst}</b>（平仓 + 开仓）。</div>
             </div>
           </DialogDescription>
-        </DialogHeader>
         <DialogFooter>
-          <Button variant="primary" onClick={t.confirmReverse}>确认反手</Button>
-          <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
+          <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
+          <Button variant="destructive" onClick={t.confirmReverse}>确认反手</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -266,10 +352,11 @@ export function ActionSheets() {
       <ModeSheet />
       <TpSlSheet />
       <Dialog open={d?.kind === "end"} onOpenChange={(o) => !o && t.closeDialog()}>
-        <DialogContent>
+        <DialogContent className="w-[min(400px,calc(100%-32px))]">
           <DialogHeader>
             <DialogTitle>结束本局？</DialogTitle>
-            <DialogDescription asChild>
+        </DialogHeader>
+        <DialogDescription className="mt-0 text-[13px] leading-[22px] [&>div>div+div]:mt-2.5" asChild>
               <div>
                 {t.round?.pos ? (
                   <>
@@ -294,24 +381,23 @@ export function ActionSheets() {
                 {t.round?.orders.length ? <div>挂单会全部撤销。</div> : null}
               </div>
             </DialogDescription>
-          </DialogHeader>
           <DialogFooter>
-            <Button variant="primary" onClick={t.confirmEnd}>结束本局</Button>
-            <Button className="ml-auto" onClick={t.closeDialog}>继续交易</Button>
+            <Button variant="secondary" onClick={t.closeDialog}>继续交易</Button>
+            <Button variant="destructive" onClick={t.confirmEnd}>结束并揭示</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={d?.kind === "peek"} onOpenChange={(o) => !o && t.closeDialog()}>
-        <DialogContent>
+        <DialogContent className="w-[min(400px,calc(100%-32px))]">
           <DialogHeader>
             <DialogTitle>揭示后面 {FIXED.peekBars} 根？</DialogTitle>
-            <DialogDescription>
+        </DialogHeader>
+        <DialogDescription className="mt-0 text-[13px] leading-[22px] [&>div>div+div]:mt-2.5">
               揭示会先结束本局：持仓按市价平掉、挂单撤销，盈亏照算，这一局标记为「看过答案」。然后把后面 {FIXED.peekBars} 根画出来。
             </DialogDescription>
-          </DialogHeader>
           <DialogFooter>
-            <Button variant="primary" onClick={t.confirmPeek}>结束并揭示</Button>
-            <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
+            <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
+            <Button variant="destructive" onClick={t.confirmPeek}>结束并揭示</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -323,7 +409,7 @@ export function ActionSheets() {
             <DialogTitle>清空记录</DialogTitle>
             <DialogDescription>清空全部记录和场次，余额回到 10,000 U。不能恢复。</DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="flex-row-reverse justify-start">
             <Button
               variant="primary"
               onClick={() => {
@@ -333,7 +419,7 @@ export function ActionSheets() {
             >
               清空
             </Button>
-            <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
+            <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -343,7 +429,7 @@ export function ActionSheets() {
             <DialogTitle>重置余额</DialogTitle>
             <DialogDescription>余额重置为 10,000 U。记录不会删。</DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="flex-row-reverse justify-start">
             <Button
               variant="primary"
               onClick={() => {
@@ -353,7 +439,7 @@ export function ActionSheets() {
             >
               重置
             </Button>
-            <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
+            <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -413,8 +499,8 @@ function LevForm() {
       </div>
       {lev >= 20 && <p className="hint">价格反向走约 {(100 / lev - 0.5).toFixed(1)}% 就会被强平（逐仓满仓时）。</p>}
       <DialogFooter>
+        <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
         <Button variant="primary" onClick={() => t.setLev(lev)}>确定</Button>
-        <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
       </DialogFooter>
     </DialogContent>
   );
@@ -445,8 +531,8 @@ function ModeForm() {
         </div>
         <p className="sheet-copy mt-3">全仓：浮亏一直吃账户，强平就是整个账户爆掉。逐仓：强平最多亏掉这个仓位的保证金。</p>
         <DialogFooter>
+          <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
           <Button variant="primary" onClick={() => t.setMode(mode)}>确定</Button>
-          <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
         </DialogFooter>
     </DialogContent>
   );
@@ -486,7 +572,7 @@ function TpSlForm() {
         <Label className="mt-3 block">止损触发价</Label>
         <Input className="mt-1" value={sl} inputMode="decimal" onChange={(e) => setSl(e.target.value)} />
         <p className="hint">按现在的仓位估算：止盈 {est(tpReal)}，止损 {est(slReal)}（已扣平仓手续费，没算滑点）</p>
-        <DialogFooter>
+        <DialogFooter className="flex-row-reverse justify-start">
           <Button
             variant="primary"
             onClick={() => t.applyTpSl(tp.trim() ? parsePrice(tp, base) : null, sl.trim() ? parsePrice(sl, base) : null)}
@@ -494,7 +580,7 @@ function TpSlForm() {
             确定
           </Button>
           <Button onClick={() => t.applyTpSl(null, null)}>全部清除</Button>
-          <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
+          <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
         </DialogFooter>
     </DialogContent>
   );
@@ -512,15 +598,18 @@ function SpeedSheet() {
 
 function SpeedForm() {
   const t = useTrainer();
-  const [v, setV] = useState(String(t.speed));
+  const [v, setV] = useState(String(+t.speed.toFixed(2)));
   return (
-    <DialogContent>
+    <DialogContent className="w-[min(400px,calc(100%-32px))]">
         <DialogHeader>
           <DialogTitle>播放速度</DialogTitle>
           <DialogDescription>每根 K 线停多少秒。最快 {SPEED_MIN} 秒，最慢 {SPEED_MAX} 秒，可以填小数。</DialogDescription>
         </DialogHeader>
-        <Input value={v} inputMode="decimal" onChange={(e) => setV(e.target.value)} />
-        <DialogFooter>
+        <div className="relative">
+          <Input value={v} autoFocus inputMode="decimal" className="h-8 bg-panel pr-14" onChange={(e) => setV(e.target.value)} />
+          <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-[12px] text-fg-3">秒/根</span>
+        </div>
+        <DialogFooter className="flex-row-reverse justify-start">
           <Button
             variant="primary"
             onClick={() => {
@@ -535,7 +624,7 @@ function SpeedForm() {
           >
             确定
           </Button>
-          <Button className="ml-auto" onClick={t.closeDialog}>取消</Button>
+          <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
         </DialogFooter>
     </DialogContent>
   );

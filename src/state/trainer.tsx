@@ -93,6 +93,8 @@ export type Trainer = Box & {
   setTab: (t: OrderTab) => void;
   setView: (iv: Interval) => void;
   addDrawing: (d: Drawing) => void;
+  updateDrawing: (d: Drawing) => void;
+  removeDrawing: (id: number) => void;
   undoDrawing: () => void;
   clearDrawings: () => void;
   saveConfig: (c: Config) => void;
@@ -550,7 +552,29 @@ function createApi(box: { current: Box }, bump: () => void) {
       if (!t) return;
       if (!t.drawings) t.drawings = [];
       const id = t.drawings.reduce((m, x) => Math.max(m, x.id), 0) + 1;
-      t.drawings = d.kind === "hline" ? [...t.drawings, { id, kind: "hline", price: d.price }] : [...t.drawings, { id, kind: d.kind, a: d.a, b: d.b }];
+      let next: Drawing;
+      if (d.kind === "hline") next = { id, kind: "hline", price: d.price, ...(d.style ? { style: d.style } : {}) };
+      else if (d.kind === "channel") next = { id, kind: "channel", a: d.a, b: d.b, c: d.c, ...(d.style ? { style: d.style } : {}) };
+      else next = { id, kind: d.kind, a: d.a, b: d.b, ...(d.style ? { style: d.style } : {}) };
+      t.drawings = [...t.drawings, next];
+      saveSoon(false);
+      bump();
+    },
+    updateDrawing(d: Drawing) {
+      const t = box.current.round;
+      if (!t?.drawings.length) return;
+      const i = t.drawings.findIndex((x) => x.id === d.id);
+      if (i < 0) return;
+      t.drawings = t.drawings.map((x) => (x.id === d.id ? d : x));
+      saveSoon(false);
+      bump();
+    },
+    removeDrawing(id: number) {
+      const t = box.current.round;
+      if (!t?.drawings.length) return;
+      const next = t.drawings.filter((x) => x.id !== id);
+      if (next.length === t.drawings.length) return;
+      t.drawings = next;
       saveSoon(false);
       bump();
     },
