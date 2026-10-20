@@ -186,18 +186,20 @@ function Body({ inst, onApply, onClose }: { inst: IndInst; onApply: (next: IndIn
                 <Swatch label="正柱颜色" value={style.histUp} colors={HIST_SWATCHES} onChange={(c) => setStyle((s) => ({ ...s, histUp: c }))} />
                 <Swatch label="负柱颜色" value={style.histDown} colors={HIST_SWATCHES} onChange={(c) => setStyle((s) => ({ ...s, histDown: c }))} />
               </div>
-              <div className="flex items-center gap-3 text-[12px]">
-                <span className="w-[100px] text-fg-2">透明度</span>
-                <Slider
-                  className="!w-[220px] shrink-0"
-                  value={[Math.round(style.histOpacity * 100)]}
-                  min={10}
-                  max={100}
-                  step={5}
-                  onValueChange={([v]) => setStyle((s) => ({ ...s, histOpacity: (v ?? 55) / 100 }))}
-                />
-                <span className="num w-10 text-right text-[11px] text-fg-2">{Math.round(style.histOpacity * 100)}%</span>
-              </div>
+              {inst.kind !== "VOL" && (
+                <div className="flex items-center gap-3 text-[12px]">
+                  <span className="w-[100px] text-fg-2">透明度</span>
+                  <Slider
+                    className="!w-[220px] shrink-0"
+                    value={[Math.round(style.histOpacity * 100)]}
+                    min={10}
+                    max={100}
+                    step={5}
+                    onValueChange={([v]) => setStyle((s) => ({ ...s, histOpacity: (v ?? 55) / 100 }))}
+                  />
+                  <span className="num w-10 text-right text-[11px] text-fg-2">{Math.round(style.histOpacity * 100)}%</span>
+                </div>
+              )}
               <label className="flex items-center gap-3 text-[12px] text-fg-2">
                 <Switch checked={style.histFollow} onCheckedChange={(v) => setStyle((s) => ({ ...s, histFollow: v }))} />
                 柱状图颜色跟随涨跌配色

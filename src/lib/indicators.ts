@@ -188,7 +188,7 @@ export function defaultStyle(inst: Pick<IndInst, "id" | "kind">): IndStyle {
         ? { visible: true, color: HIST_NEUTRAL, width: 1, dash: "dashed" }
         : { visible: true, color: i === 1 && inst.kind !== "BBANDS" ? second : base, width: 1, dash: "solid" };
   });
-  return { hidden: false, collapsed: false, lines, histUp: HIST_UP, histDown: HIST_DOWN, histOpacity: 0.55, histFollow: true };
+  return { hidden: false, collapsed: false, lines, histUp: HIST_UP, histDown: HIST_DOWN, histOpacity: inst.kind === "VOL" ? 1 : 0.55, histFollow: true };
 }
 
 const isHex = (v: unknown): v is string => typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
@@ -214,7 +214,8 @@ export function styleOf(inst: Pick<IndInst, "id" | "kind" | "style">): IndStyle 
     lines,
     histUp: isHex(raw.histUp) ? raw.histUp : def.histUp,
     histDown: isHex(raw.histDown) ? raw.histDown : def.histDown,
-    histOpacity: typeof raw.histOpacity === "number" && raw.histOpacity >= 0 && raw.histOpacity <= 1 ? raw.histOpacity : def.histOpacity,
+    // VOL sub-pane bars are always solid (legacy saves often had 0.55 from MACD defaults).
+    histOpacity: inst.kind === "VOL" ? 1 : typeof raw.histOpacity === "number" && raw.histOpacity >= 0 && raw.histOpacity <= 1 ? raw.histOpacity : def.histOpacity,
     histFollow: typeof raw.histFollow === "boolean" ? raw.histFollow : def.histFollow,
   };
 }
@@ -433,13 +434,14 @@ export async function computeIndicators(bars: Bar[], insts: IndInst[], base: num
         plots.push(plotOf(inst, "line", pane, color, "line", bars, out.cols[0], out.beg, price));
       } else if (inst.kind === "VOL") {
         // Blind: relative to mean volume (×); unveiled: raw. Color by candle direction (histFollow respects greenUp).
+        // Always opaque — no translucent fill on the volume sub-pane.
         const vols = relVolume(bars, base);
         const hist = bars.map((b, i) => {
           const rise = b.c >= b.o;
           return {
             time: Math.floor(b.t / 1000),
             value: vols[i],
-            color: alphaHex(rise ? hUp : hDown, st.histOpacity),
+            color: rise ? hUp : hDown,
           };
         });
         plots.push({ id: `${inst.id}:hist`, inst: inst.id, pane, color: "#8A939D", style: "hist", points: hist });

@@ -279,6 +279,17 @@ export function loadInds(): IndInst[] {
     store.set("fut-vol-seeded", true);
     store.set("fut-ind", out);
   }
+  // Force VOL hist fully opaque (old saves inherited MACD's 0.55 translucent default).
+  let volFixed = false;
+  for (let i = 0; i < out.length; i++) {
+    if (out[i].kind !== "VOL") continue;
+    const st = styleOf(out[i]);
+    if (st.histOpacity !== 1 || out[i].style?.histOpacity !== 1) {
+      out[i] = { ...out[i], style: { ...st, histOpacity: 1 } };
+      volFixed = true;
+    }
+  }
+  if (volFixed) store.set("fut-ind", out);
   return out;
 }
 
