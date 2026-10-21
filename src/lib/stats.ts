@@ -41,7 +41,7 @@ export function statsOf(rows: RoundLog[]): Stats {
   };
 }
 
-export function download(name: string, text: string, type: string) {
+export function download(name: string, text: string | Uint8Array<ArrayBuffer>, type: string) {
   const b = new Blob([text], { type });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(b);

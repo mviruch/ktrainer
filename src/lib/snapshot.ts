@@ -38,6 +38,19 @@ export function snapFrame(round: Round, iv: Interval, want: number, base: number
   return { interval: iv, want, got: bars.length, bars, reason: notes.length ? notes.join("；") : null };
 }
 
+const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
+
+/** Base bars from D0 (bars[ctx-1]) to round end (bars[cursor-1]): 100-base (6 dp), volume / mean volume of every
+ *  played base bar (same as the chart). null when the round has no base. */
+export function roundBarsOf(round: Round): SnapBar[] | null {
+  const base = blindBaseOf(round.bars, round.ctx, false);
+  if (!base) return null;
+  const played = round.bars.slice(0, round.cursor);
+  const avg = played.reduce((a, b) => a + b.v, 0) / (played.length || 1) || 1;
+  const k = 100 / base;
+  return round.bars.slice(round.ctx - 1, round.cursor).map((b) => [b.t, r6(b.o * k), r6(b.h * k), r6(b.l * k), r6(b.c * k), r4(b.v / avg)]);
+}
+
 export function takeSnapshot(round: Round, cap?: CaptureIn): Snapshot {
   const i = round.cursor - 1;
   const base = blindBaseOf(round.bars, round.ctx, false);

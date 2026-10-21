@@ -36,12 +36,28 @@ function refreshStat(s: PosStat) {
   s.mfeR = s.risk ? dFav / s.risk : null;
   s.maeR = s.risk ? dAdv / s.risk : null;
   s.rMult = s.riskU ? s.pnl / s.riskU : null;
+  s.rMultNet = s.riskU ? (s.pnl - (s.fees ?? 0)) / s.riskU : null;
 }
 
-function touchStat(s: PosStat, p: number) {
-  if (p > s.hi) s.hi = p;
-  if (p < s.lo) s.lo = p;
+/** Bar extreme (or intrabar trigger price) at bar i. Never a fill price. */
+function touchStat(s: PosStat, p: number, i: number) {
+  if (p > s.hi) {
+    s.hi = p;
+    if (s.side > 0) s.mfeI = i;
+    else s.maeI = i;
+  }
+  if (p < s.lo) {
+    s.lo = p;
+    if (s.side > 0) s.maeI = i;
+    else s.mfeI = i;
+  }
   refreshStat(s);
+}
+
+function trackRisk(s: PosStat, P: Pos) {
+  if (!P.sl) return;
+  const r = Math.abs(P.entry - P.sl) * P.qty;
+  if (s.riskUMax == null || r > s.riskUMax) s.riskUMax = r;
 }
 
 function setSl0(s: PosStat, sl: number) {
@@ -51,10 +67,11 @@ function setSl0(s: PosStat, sl: number) {
   refreshStat(s);
 }
 
-function closeStat(t: Round, pid: number | undefined, idx: number, price: number, reason: CloseReason) {
+/** trigger: intrabar close level (TP / SL / liq / limit), counted as reached in bar idx; null for bar-close exits. */
+function closeStat(t: Round, pid: number | undefined, idx: number, trigger: number | null, reason: CloseReason) {
   const s = statOf(t, pid);
   if (!s || s.closeI != null) return;
-  touchStat(s, price);
+  if (trigger != null && idx > s.openI) touchStat(s, trigger, idx);
   s.closeI = idx;
   s.bars = idx - s.openI;
   s.reason = reason;
@@ -66,6 +83,8 @@ type FillMeta = {
   orderPrice: number | null;
   /** Reason used if this fill closes a position. */
   reason: CloseReason;
+  /** Set when the fill happens inside a bar (advance): the price level reached there (limit / TP / SL). */
+  intrabar?: number | null;
   view: Fill["view"];
   snap: Snapshot | null;
 };
@@ -169,7 +188,8 @@ function openPos(t: Round, side: Side, qty: number, price: number, lev: number, 
   t.pos.pid = id;
   t.posStats.push({
     id, side, openI: idx, closeI: null, bars: null, entry: price, qty0: qty, sl0: null, risk: null, riskU: null,
-    hi: price, lo: price, mfePx: price, maePx: price, mfeR: null, maeR: null, pnl: 0, rMult: null, adds: 0, reason: null,
+    hi: price, lo: price, mfePx: price, maePx: price, mfeR: null, maeR: null, mfeI: null, maeI: null,
+    fees: 0, riskUMax: null, pnl: 0, rMult: null, rMultNet: null, adds: 0, reason: null,
   });
   return closeQ > 0 ? "反手开" + (side > 0 ? "多" : "空") : "开" + (side > 0 ? "多" : "空");
 }
@@ -203,11 +223,12 @@ function applyFill(
     const st = statOf(t, P.pid);
     if (st) {
       st.pnl += realized;
-      touchStat(st, price);
+      st.fees = (st.fees ?? 0) + qty * price * feeRate * (closeQ / qty);
+      refreshStat(st);
     }
     if (P.qty * price < 1e-6) {
       t.pos = null;
-      closeStat(t, P.pid, idx, price, m.reason);
+      closeStat(t, P.pid, idx, m.intrabar ?? null, m.reason);
     }
   }
   let openPosId: number | null = null;
@@ -225,12 +246,15 @@ function applyFill(
       const st = statOf(t, t.pos.pid);
       if (st) {
         st.adds++;
-        touchStat(st, price);
+        st.fees = (st.fees ?? 0) + openQ * price * feeRate;
+        refreshStat(st);
       }
       posId = t.pos.pid ?? null;
     } else {
       tag = openPos(t, side, openQ, price, lev, mode, idx, closeQ);
       openPosId = (t.pos as Pos | null)?.pid ?? null;
+      const ns = statOf(t, openPosId ?? undefined);
+      if (ns) ns.fees = openQ * price * feeRate;
       if (posId == null) posId = openPosId;
     }
   } else tag = "平" + oppL;
@@ -272,6 +296,7 @@ function attachTpSl(t: Round, f: Fill | null, side: Side, tp: number | null, sl:
   if (tp || sl) pushEv(t, "tpsl", "order", f.i, oid, f.price, side, { tp: t.pos.tp, sl: t.pos.sl, why: "随单设置", posId: t.pos.pid ?? null });
   const st = statOf(t, t.pos.pid);
   if (st && f.openPosId === st.id && st.sl0 == null && sl) setSl0(st, sl);
+  if (st && (f.openPosId === st.id || f.tag.startsWith("加"))) trackRisk(st, t.pos);
   f.tp = t.pos.tp;
   f.sl = t.pos.sl;
 }
@@ -288,6 +313,7 @@ function fillOrder(t: Round, o: Order, price: number, idx: number, lev: number, 
   const f = applyFill(t, o.side, o.qty, price, FEE_MAKER, idx, "限价", lev, mode, undefined, {
     oid: o.id,
     orderPrice: o.price,
+    intrabar: price,
     reason: "manual",
     view: o.view ?? null,
     snap: o.snap ?? null,
@@ -311,7 +337,10 @@ function liquidate(t: Round, at: number, idx: number, msgs: string[]) {
   const oid = t.oid++;
   pushEv(t, "trigger", "liq", idx, oid, at, opp(P.side), { posId: P.pid ?? null });
   const st = statOf(t, P.pid);
-  if (st) st.pnl += raw;
+  if (st) {
+    st.pnl += raw;
+    st.fees = (st.fees ?? 0) + paidFee;
+  }
   closeStat(t, P.pid, idx, at, "liq");
   for (const o of t.orders) pushEv(t, "cancel", "liq", idx, o.id, o.price, o.side, { why: "强平后撤单" });
   t.fills.push({
@@ -405,7 +434,7 @@ function runSeg(
         lev,
         mode,
         best.kind === "tp" ? "止盈" : "止损",
-        { oid, orderPrice: at, reason: k, view: null, snap: null },
+        { oid, orderPrice: at, intrabar: at, reason: k, view: null, snap: null },
       );
     }
     cur = best.t;
@@ -427,8 +456,8 @@ export function advance(t: Round, lev: number, mode: Pos["mode"]) {
   processBar(t, lev, mode, k, prevC, t.cursor - 1, toasts);
   const st = statOf(t, t.pos?.pid);
   if (st && st.closeI == null && st.openI < t.cursor - 1) {
-    touchStat(st, k.h);
-    touchStat(st, k.l);
+    touchStat(st, k.h, t.cursor - 1);
+    touchStat(st, k.l, t.cursor - 1);
   }
   const eq = equityAt(t, k.c);
   if (eq > t.peakEq) t.peakEq = eq;

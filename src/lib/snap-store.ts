@@ -1,6 +1,7 @@
 /* Order-time K-line snapshots: persisted per round through an injected SnapStore (IndexedDB in the shell,
    memory in tests). The core only knows this interface. */
-import type { Round, Snapshot } from "./types.ts";
+import { roundBarsOf } from "./snapshot.ts";
+import type { Round, SnapBar, Snapshot } from "./types.ts";
 
 export const SNAP_KEEP = 50;
 
@@ -12,6 +13,8 @@ export type SnapRec = {
   done: boolean;
   /** One per order id (a filled limit order and its fill share the id). */
   snaps: { oid: number; snap: Snapshot }[];
+  /** Written once the round is done: base bars D0 → round end (see roundBarsOf). Missing on older records. */
+  roundBars?: SnapBar[] | null;
 };
 
 export interface SnapStore {
@@ -26,7 +29,14 @@ export function collectSnaps(t: Round): SnapRec {
   const seen = new Map<number, Snapshot>();
   for (const f of t.fills) if (f.snap && f.oid != null && !seen.has(f.oid)) seen.set(f.oid, f.snap);
   for (const o of t.orders) if (o.snap && !seen.has(o.id)) seen.set(o.id, o.snap);
-  return { v: 1, startedAt: t.startedAt, at: Date.now(), done: !!t.done, snaps: [...seen].map(([oid, snap]) => ({ oid, snap })) };
+  return {
+    v: 1,
+    startedAt: t.startedAt,
+    at: Date.now(),
+    done: !!t.done,
+    snaps: [...seen].map(([oid, snap]) => ({ oid, snap })),
+    ...(t.done ? { roundBars: roundBarsOf(t) } : {}),
+  };
 }
 
 /** Cheap change detector so the shell only writes when the snapshot set changed. */

@@ -81,7 +81,9 @@ const cap = { view: "15m" as Interval, inds: [{ id: 1, kind: "EMA", params: { pe
   assert(last.reason === "tp" && last.orderPrice === 106 && last.posId === 1 && last.sl === 99 && last.view === null, "tp fill");
   assert(s.reason === "tp" && s.closeI === s.openI + 3 && s.bars === 3, "hold bars");
   assert(near(s.maePx, 99) && near(s.maeR, (entry - 99) / (entry - 98)), "MAE");
-  assert(near(s.mfePx, 106 * (1 - 1e-4)) && near(s.mfeR, (106 * 0.9999 - entry) / (entry - 98)), "MFE (exit bar counts up to exit)");
+  // unified rule: bar highs (103 on bar 2), TP bar counts up to the trigger 106 (bar high 107 and the slipped fill don't)
+  assert(near(s.mfePx, 106) && near(s.mfeR, (106 - entry) / (entry - 98)) && s.mfeI === s.closeI, "MFE: TP bar up to trigger");
+  assert(s.maeI === s.openI + 1, "MAE bar");
   assert(near(s.rMult, s.pnl / ((entry - 98) * s.qty0)) && s.rMult! > 0, "R multiple");
   const kinds = t.events.map((e) => `${e.kind}:${e.src}`).join(",");
   assert(kinds === "trigger:market,tpsl:order,trigger:market,tpsl:order,tpsl:manual,trigger:tp", "events " + kinds);

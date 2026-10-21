@@ -42,6 +42,13 @@ async function storeSuite(name: string, mk: () => SnapStore) {
   assert(JSON.stringify(fresh.fills[0].snap) === JSON.stringify(t.fills[0].snap), `${name}: snapshot identical`);
   assert(fresh.orders[0].snap?.i === t.orders[0].snap?.i, `${name}: pending order snapshot`);
   assert(snapSig(fresh) === snapSig(t), `${name}: signature stable after restore`);
+  assert((await st.get(1000))!.roundBars === undefined, `${name}: no round_bars while live`);
+  finishRound(t, 5, "cross");
+  t.done = true; // as endRound
+  await saveSnaps(st, t);
+  const rb = (await st.get(1000))!.roundBars!;
+  assert(rb && rb.length === t.cursor - t.ctx + 1 && rb[0][0] === t.bars[t.ctx - 1].t && Math.abs(rb[0][4] - 100) < 1e-9, `${name}: round_bars stored on finish (${rb?.length})`);
+  assert(rb.every((b) => b.length === 6 && b.slice(1, 5).every((v) => Math.abs(v - 100) < 1)), `${name}: round_bars 100-base, no real volume`);
   // retention: 55 rounds → newest 50 kept, oldest dropped first
   for (let k = 1; k <= 55; k++) {
     const r = mkRound(2000 + k);

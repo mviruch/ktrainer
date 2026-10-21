@@ -105,9 +105,17 @@ export type PosStat = {
   /** |entry - sl0| per unit, and that times qty0 in U. */
   risk: number | null;
   riskU: number | null;
-  /** Extremes seen while held (bars after the open bar, plus fill prices). */
+  /** Extremes while held: bar high / low of bars after the open bar only; an intrabar TP / SL / liq / limit close
+   *  counts up to its trigger price. Fill prices (slippage) never count. Start = entry (no excursion). */
   hi: number;
   lo: number;
+  /** Bar index (absolute, like openI) where mfePx / maePx was reached; null = no excursion yet. Missing on old saves. */
+  mfeI?: number | null;
+  maeI?: number | null;
+  /** Fees of every fill of this position (open, adds, closes; a reverse fill is split by quantity). */
+  fees?: number;
+  /** Max over open + each add of |avg entry - SL in effect| × position qty (U). R denominator stays riskU. */
+  riskUMax?: number | null;
   /** Most favourable / adverse price and the distance in R (both ≥ 0). */
   mfePx: number;
   maePx: number;
@@ -115,8 +123,9 @@ export type PosStat = {
   maeR: number | null;
   /** Gross realized pnl of all closing fills (fees excluded). */
   pnl: number;
-  /** pnl / riskU. */
+  /** pnl / riskU, and (pnl - fees) / riskU. */
   rMult: number | null;
+  rMultNet?: number | null;
   adds: number;
   reason: CloseReason | null;
 };

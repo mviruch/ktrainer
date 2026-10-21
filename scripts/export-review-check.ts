@@ -1,6 +1,11 @@
 // Run: node --experimental-strip-types scripts/export-review-check.ts
 import { advance, cancelOrder, finishRound, newRound, placeOrder, setPosTpSl, closePct } from "../src/lib/engine.ts";
-import { buildReviewExport, CSV_COLS, reviewCsv, reviewJson } from "../src/lib/export-review.ts";
+import { buildReviewExport, CSV_COLS, REVIEW_FILES, reviewCsv, reviewFiles, reviewJson, reviewSummaryCsv, SUMMARY_COLS } from "../src/lib/export-review.ts";
+import { zipFiles } from "../src/lib/zip.ts";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { toReview, type ReviewRec } from "../src/lib/review-store.ts";
 import { collectSnaps, type SnapRec } from "../src/lib/snap-store.ts";
 import { withDerivedFrames } from "../src/lib/frames.ts";
@@ -93,7 +98,7 @@ assert(x.rounds.length === 5 && !x.rounds.some((r) => r.round_id === 999), "only
 const [A, B, C, D, E] = x.rounds;
 // structure
 assert(A.reveal_status === "revealed" && A.symbol === "SOLUSDT" && A.real_t0 && A.fills[0].real, "revealed: symbol/real");
-assert(B.reveal_status === "blind" && !("symbol" in B) && !("real_t0" in B) && B.fills.every((f) => !("real" in f)), "blind: no real");
+assert(B.reveal_status === "blind" && B.symbol === "HIDDEN" && x.rounds.every((r) => r.reveal_status === "revealed" || r.symbol === "HIDDEN") && !("real_t0" in B) && B.fills.every((f) => !("real" in f)), "blind: no real");
 assert(JSON.stringify(A.aggregated_timeframes) === '["15m","1h"]' && JSON.stringify(B.aggregated_timeframes) === '["15m","1h"]', "aggregated_timeframes from Frame.derived");
 assert(E.aggregated_timeframes === null, "old record → aggregated_timeframes null");
 assert(!csv.includes("aggregated"), "CSV unchanged (no aggregated column)");
@@ -102,7 +107,61 @@ const kinds = A.events.map((e) => e.kind + ":" + e.src).join(",");
 assert(kinds.startsWith("place:limit,cancel:manual,trigger:market,tpsl:order,trigger:market,tpsl:manual,trigger:market"), "event stream " + kinds);
 assert(A.fills.map((f) => f.open_close).join(",") === "open,add,close,close" && A.fills.at(-1)!.close_reason === "round_end", "open/close " + A.fills.map((f) => f.open_close + ":" + f.close_reason));
 assert(A.fills[0].bar_index === rounds[0].log.list[0].i - 1 + 1 && A.fills[0].bar_index === rounds[0].t.fills[0].i - (rounds[0].t.ctx - 1), "bar_index = legacy relative index");
-assert(A.positions.length === 1 && A.positions[0].initial_risk_r != null && A.positions[0].r_multiple != null && A.positions[0].adds === 1, "position R");
+assert(A.positions.length === 1 && A.positions[0].initial_risk_100 != null && A.positions[0].r_multiple != null && A.positions[0].adds === 1, "position R");
+assert(!json.includes("initial_risk_r") && !csv.includes("initial_risk_r") && csv.split("\n")[0].includes("pos_initial_risk_100"), "renamed initial_risk_100");
+{
+  const p = A.positions[0];
+  const s = rounds[0].t.posStats[0];
+  assert(p.risk_u_max != null && p.risk_u_max >= p.risk_u!, "risk_u_max ≥ risk_u");
+  assert(p.r_multiple_net != null && p.r_multiple_net < p.r_multiple!, "net R below gross (fees)");
+  assert(p.fees != null && Math.abs(p.fees - rounds[0].t.fills.reduce((a, f) => a + f.fee, 0)) < 1e-3, "position fees");
+  assert(p.mfe_bar === (s.mfeI == null ? null : s.mfeI - (rounds[0].t.ctx - 1)) && p.mae_bar === (s.maeI == null ? null : s.maeI - (rounds[0].t.ctx - 1)), "mfe/mae bar on fill axis");
+  assert(p.mfe_bar == null || (p.mfe_bar > p.open_bar && p.mfe_bar <= p.close_bar!), "mfe bar after open bar");
+}
+// trigger events carry qty_100 / notional_u (= the fill of the same order id); others null
+for (const e of A.events) {
+  if (e.kind !== "trigger") assert(e.qty_100 === null && e.notional_u === null, "non-trigger qty null");
+  else {
+    const f = A.fills.find((x) => x.order_id === e.order_id)!;
+    assert(e.qty_100 === f.qty_100 && e.notional_u === f.notional_u && e.qty_100 != null, "trigger qty_100 = fill " + e.order_id);
+  }
+}
+// bar_index: fill and snapshot share one axis (0 = opening bar)
+assert(A.fills.every((f) => !f.snapshot || f.snapshot.bar_index === f.bar_index), "snapshot.bar_index == fill.bar_index for orders filled at once");
+// round_bars
+{
+  const t = rounds[0].t;
+  assert(A.round_bars && A.round_bars.length === t.cursor - t.ctx + 1 && A.round_bars[0].bar_index === 0 && A.round_bars[0].d_time === "D0 00:00", "round_bars D0 → end");
+  assert(A.round_bars.at(-1)!.bar_index === A.total_bars && Math.abs(A.round_bars[0].c! - 100) < 1e-9, "round_bars last = total_bars, D0 close = 100");
+  const lastReal = t.bars[t.cursor - 1];
+  assert(A.round_bars.at(-1)!.real && Math.abs(A.round_bars.at(-1)!.real!.c - lastReal.c) / lastReal.c < 1e-8, "revealed: real prices");
+  assert(B.round_bars && B.round_bars.every((b) => !("real" in b)), "blind: no real");
+  assert(C.round_bars && C.round_bars.every((b) => b.o === null && b.c === null && !("real" in b)) && C.round_bars_reason === "缺 base", "no base → round_bars prices null " + C.round_bars_reason);
+  assert(D.round_bars === null && D.round_bars_reason!.includes("超出"), "pruned → null");
+}
+// summary CSV + zip
+{
+  const sum = reviewSummaryCsv(x).replace(/^\uFEFF/, "").split("\n");
+  assert(sum[0] === SUMMARY_COLS.join(",") && sum.length === 1 + x.rounds.length, "summary rows");
+  const cols = sum[1].split(",").map((v) => v.replace(/^"|"$/g, ""));
+  const get = (k: string) => cols[SUMMARY_COLS.indexOf(k as never)];
+  assert(+get("pnl") === A.pnl && +get("max_drawdown") === A.max_drawdown && +get("r_sum") === Math.round(A.positions[0].r_multiple! * 1e6) / 1e6, "summary values");
+  assert(get("aggregated_timeframes") === "15m|1h" && sum[2].includes('"HIDDEN"'), "summary symbol hidden for blind");
+  // aggregated_timeframes column: list → a|b, [] → empty, old record (null) → NA
+  const aggCol = (xx: typeof x) => reviewSummaryCsv(xx).replace(/^\uFEFF/, "").split("\n").slice(1).map((l) => l.split(",")[SUMMARY_COLS.indexOf("aggregated_timeframes")]);
+  const ei = x.rounds.indexOf(E);
+  assert(aggCol(x)[0] === '"15m|1h"' && aggCol(x)[ei] === '"NA"', "summary agg: list / NA " + aggCol(x));
+  const x2 = JSON.parse(JSON.stringify(x)) as typeof x;
+  x2.rounds[0].aggregated_timeframes = [];
+  assert(aggCol(x2)[0] === '""', "summary agg: [] → empty");
+  const dir = mkdtempSync(join(tmpdir(), "kz-"));
+  const files = reviewFiles(x);
+  writeFileSync(join(dir, "r.zip"), zipFiles(files));
+  const list = execFileSync("unzip", ["-Z1", join(dir, "r.zip")]).toString().trim().split("\n");
+  assert(list.join() === [REVIEW_FILES.json, REVIEW_FILES.fills, REVIEW_FILES.rounds].join(), "zip entries " + list);
+  execFileSync("unzip", ["-tq", join(dir, "r.zip")]); // CRC check
+  for (const f of files) assert(execFileSync("unzip", ["-p", join(dir, "r.zip"), f.name], { maxBuffer: 1 << 26 }).toString() === f.data, "zip content " + f.name);
+}
 assert(A.fills[0].snapshot && A.fills[0].snapshot.frames.length === 4, "snapshot present");
 const f15 = A.fills[0].snapshot!.frames[1];
 assert(f15.interval === "15m" && f15.got === 100 && f15.reason!.includes("聚合"), "15m aggregated from 5m: " + f15.reason + " " + f15.got);
@@ -154,9 +213,10 @@ function leaks(text: string, r: (typeof rounds)[number]) {
   for (const b of r.t.bars) if (nums.has(b.v)) out.push("volume " + b.v);
   return out;
 }
+const summary = reviewSummaryCsv(x);
 for (const k of [1, 2, 3, 4]) {
   const r = rounds[k];
-  const part = JSON.stringify(x.rounds[k]);
+  const part = JSON.stringify(x.rounds[k]) + "\n" + summary.split("\n").filter((l) => l.startsWith(`"${r.rv.startedAt}"`)).join("\n");
   const rows = csv.split("\n").filter((l) => l.startsWith(`"${r.rv.startedAt}"`)).join("\n");
   const hit = [...leaks(part, r), ...leaks(rows, r)];
   assert(hit.length === 0, `round ${k} leaks: ${hit.slice(0, 6).join(" | ")}`);

@@ -38,7 +38,8 @@ import {
 import { onStoreFail, store } from "@/lib/store";
 import { toReview } from "@/lib/review-store";
 import { attachSnaps, memorySnapStore, saveSnaps, SNAP_KEEP, snapSig, type SnapRec, type SnapStore } from "@/lib/snap-store";
-import { buildReviewExport, reviewCsv, reviewJson } from "@/lib/export-review";
+import { buildReviewExport, reviewFiles } from "@/lib/export-review";
+import { zipFiles } from "@/lib/zip";
 import { download } from "@/lib/stats";
 import { idbSnapStore } from "@/state/idb-snaps";
 import { activeView, bucketOpen, intervalList } from "@/lib/frames";
@@ -781,9 +782,9 @@ function createApi(box: { current: Box }, bump: () => void) {
         toastMsg("读取 K 线快照失败，这次导出里的快照会是空的", 4000);
       }
       const x = buildReviewExport(log, reviews, { recs, keys, keep: SNAP_KEEP });
-      download("合约训练复盘.json", reviewJson(x), "application/json");
-      window.setTimeout(() => download("合约训练复盘.csv", reviewCsv(x), "text/csv;charset=utf-8"), 300);
-      toastMsg(`已导出 ${x.rounds.length} 局复盘（JSON + CSV）`, 2600);
+      // One zip (JSON + fills CSV + rounds CSV): browsers often block or prompt on several downloads in a row.
+      download("合约训练复盘.zip", zipFiles(reviewFiles(x)) as Uint8Array<ArrayBuffer>, "application/zip");
+      toastMsg(`已导出 ${x.rounds.length} 局复盘（zip：JSON + 成交 CSV + 局汇总 CSV）`, 2600);
       return true;
     },
     restoreSnaps(t: Round) {
