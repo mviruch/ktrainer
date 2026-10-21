@@ -146,9 +146,6 @@ export function ResultPanel() {
         <Button variant="primary" size="lg" className="w-full" onClick={t.next}>
           {nextLabel}
         </Button>
-        <Button size="default" className="h-9 w-full" disabled={t.peeking} onClick={t.requestPeek}>
-          揭示后面 300 根
-        </Button>
       </div>
     </div>
   );

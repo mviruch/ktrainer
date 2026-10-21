@@ -248,7 +248,6 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
         <div><span>滑点</span><b>市价成交 BTC、ETH 万 1，其他币 万 3；跳空按开盘价</b></div>
         <div><span>保证金</span><b>全仓 / 逐仓，1–125x，维持保证金率 0.5%</b></div>
         <div><span>开局揭示</span><b>起点之前最多 {FIXED.ctxMax} 根</b></div>
-        <div><span>揭示答案</span><b>后面 {FIXED.peekBars} 根</b></div>
         <div><span>图表</span><b>盲轴（开局收盘 = 100）、对数刻度、成交量按均量倍数</b></div>
       </div>
       <Separator className="my-4" />
@@ -387,20 +386,6 @@ export function ActionSheets() {
           <DialogFooter>
             <Button variant="secondary" onClick={t.closeDialog}>继续交易</Button>
             <Button variant="destructive" onClick={t.confirmEnd}>结束并揭示</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={d?.kind === "peek"} onOpenChange={(o) => !o && t.closeDialog()}>
-        <DialogContent className="w-[min(400px,calc(100%-32px))]">
-          <DialogHeader>
-            <DialogTitle>揭示后面 {FIXED.peekBars} 根？</DialogTitle>
-        </DialogHeader>
-        <DialogDescription className="mt-0 text-[13px] leading-[22px] [&>div>div+div]:mt-2.5">
-              揭示会先结束本局：持仓按市价平掉、挂单撤销，盈亏照算，这一局标记为「看过答案」。然后把后面 {FIXED.peekBars} 根画出来。
-            </DialogDescription>
-          <DialogFooter>
-            <Button variant="secondary" onClick={t.closeDialog}>取消</Button>
-            <Button variant="destructive" onClick={t.confirmPeek}>结束并揭示</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

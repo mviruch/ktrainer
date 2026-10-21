@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronsDownUp, Eye, Maximize2, Ellipsis, Pause, Play, RefreshCw, SkipForward } from "lucide-react";
+import { ChevronsDownUp, Maximize2, Ellipsis, Pause, Play, RefreshCw, SkipForward } from "lucide-react";
 import { IV_CN, IV_OK } from "@/lib/constants";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -87,12 +87,6 @@ export function Transport() {
       {short ? "结束" : "结束本局"}
     </Button>
   );
-  const peekBtn = (
-    <Button size="sm" disabled={!(on || t.phase === "result") || t.peeking} onClick={t.requestPeek} className="h-8 min-h-8 shrink-0">
-      {!phone && <Eye />}
-      {short ? "揭示" : "揭示 300 根"}
-    </Button>
-  );
   const abortBtn = (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -113,18 +107,17 @@ export function Transport() {
       {!short && <Kbd>F</Kbd>}
     </Button>
   );
-  /** Phone design: 播放/下一根/速度/结束/揭示. 换一段+适应 go in ⋯. */
+  /** Phone design: 播放/下一根/速度/结束. 换一段+适应 go in ⋯. */
   const moreExtras = (
     <>
       {abortBtn}
       {fitBtn}
     </>
   );
-  /** Wide: end lives only in right dense panel; transport keeps abort/peek/fit. */
+  /** Wide: end lives only in right dense panel; transport keeps abort/fit. */
   const wideExtras = (
     <>
       {abortBtn}
-      {peekBtn}
       {fitBtn}
     </>
   );
@@ -149,7 +142,6 @@ export function Transport() {
         <>
           <Separator orientation="vertical" className="!h-5 shrink-0" />
           {endBtn}
-          {peekBtn}
           <Popover>
             <PopoverTrigger asChild>
               <Button size="sm" variant="ghost" className="h-8 min-h-8 shrink-0" aria-label="更多控制">
