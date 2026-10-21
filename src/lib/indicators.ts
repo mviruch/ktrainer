@@ -1,3 +1,4 @@
+import { CANDLE_DOWN, CANDLE_UP } from "./constants";
 import wasmUrl from "talib-web/lib/talib.wasm?url";
 import type { Bar } from "./types";
 
@@ -144,6 +145,9 @@ const PALETTE = ["#2F6F9F", "#B7800F", "#7A5EA7", "#C46B4A", "#1E7A62", "#3E6B8A
 export const IND_COLORS = PALETTE;
 export const HIST_UP = "#1E9468";
 export const HIST_DOWN = "#CC4444";
+/** VOL bars follow candle direction with the exact candle colors. */
+const VOL_UP = CANDLE_UP;
+const VOL_DOWN = CANDLE_DOWN;
 export const HIST_NEUTRAL = "#8A939D";
 
 export function lineSlots(kind: IndKind): { key: string; label: string }[] {
@@ -188,7 +192,7 @@ export function defaultStyle(inst: Pick<IndInst, "id" | "kind">): IndStyle {
         ? { visible: true, color: HIST_NEUTRAL, width: 1, dash: "dashed" }
         : { visible: true, color: i === 1 && inst.kind !== "BBANDS" ? second : base, width: 1, dash: "solid" };
   });
-  return { hidden: false, collapsed: false, lines, histUp: HIST_UP, histDown: HIST_DOWN, histOpacity: inst.kind === "VOL" ? 1 : 0.55, histFollow: true };
+  return { hidden: false, collapsed: false, lines, histUp: inst.kind === "VOL" ? VOL_UP : HIST_UP, histDown: inst.kind === "VOL" ? VOL_DOWN : HIST_DOWN, histOpacity: inst.kind === "VOL" ? 1 : 0.55, histFollow: true };
 }
 
 const isHex = (v: unknown): v is string => typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
@@ -212,8 +216,9 @@ export function styleOf(inst: Pick<IndInst, "id" | "kind" | "style">): IndStyle 
     hidden: typeof raw.hidden === "boolean" ? raw.hidden : def.hidden,
     collapsed: typeof raw.collapsed === "boolean" ? raw.collapsed : def.collapsed,
     lines,
-    histUp: isHex(raw.histUp) ? raw.histUp : def.histUp,
-    histDown: isHex(raw.histDown) ? raw.histDown : def.histDown,
+    // VOL: the old shared hist defaults (#1E9468 / #CC4444) are treated as "unset" → candle colors; user-picked colors stay.
+    histUp: isHex(raw.histUp) && !(inst.kind === "VOL" && raw.histUp.toUpperCase() === HIST_UP) ? raw.histUp : def.histUp,
+    histDown: isHex(raw.histDown) && !(inst.kind === "VOL" && raw.histDown.toUpperCase() === HIST_DOWN) ? raw.histDown : def.histDown,
     // VOL sub-pane bars are always solid (legacy saves often had 0.55 from MACD defaults).
     histOpacity: inst.kind === "VOL" ? 1 : typeof raw.histOpacity === "number" && raw.histOpacity >= 0 && raw.histOpacity <= 1 ? raw.histOpacity : def.histOpacity,
     histFollow: typeof raw.histFollow === "boolean" ? raw.histFollow : def.histFollow,

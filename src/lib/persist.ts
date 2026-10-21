@@ -284,7 +284,9 @@ export function loadInds(): IndInst[] {
   for (let i = 0; i < out.length; i++) {
     if (out[i].kind !== "VOL") continue;
     const st = styleOf(out[i]);
-    if (st.histOpacity !== 1 || out[i].style?.histOpacity !== 1) {
+    // Compare against what is actually on disk (out[] is already normalized by styleOf).
+    const raw = (saved.find((r) => r && r.id === out[i].id && r.kind === "VOL")?.style ?? out[i].style) as Partial<IndStyle> | undefined;
+    if (st.histOpacity !== 1 || raw?.histOpacity !== 1 || raw?.histUp !== st.histUp || raw?.histDown !== st.histDown) {
       out[i] = { ...out[i], style: { ...st, histOpacity: 1 } };
       volFixed = true;
     }

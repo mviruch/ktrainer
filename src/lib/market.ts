@@ -138,6 +138,20 @@ export async function fetchMore(symbol: string, iv: string, from: number, want =
   }
 }
 
+/** Reveal check: confirm the settled window really exists for this symbol. Throws on network / missing data. */
+export async function revealWindow(symbol: string, iv: string, t0: number) {
+  if (!symbol || !Number.isFinite(t0)) throw new Error("数据缺失：本局没有标的或开局时间");
+  let bars: Bar[];
+  try {
+    bars = await fetchCrypto(symbol, iv, t0, 1);
+  } catch (e) {
+    const fe = e as FeedErr;
+    throw new Error(fe.allEmpty ? "数据缺失：行情源查不到这一段" : "网络问题：连不上行情源", { cause: e });
+  }
+  if (!bars.length || bars[0].t !== t0) throw new Error("数据缺失：行情源查不到这一段");
+  return bars[0];
+}
+
 const LISTED_TTL = 30 * 864e5;
 type Listed = Record<string, { t: number | null; at: number }>;
 let LISTED = store.get<Listed>("fut-listed", {});

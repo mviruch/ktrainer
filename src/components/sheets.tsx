@@ -51,7 +51,7 @@ function StatsBody(_props: { onClose: () => void }) {
     const lines = [cols.join(",")].concat(
       t.log.map((r) =>
         cols
-          .map((c) => q(c === "symbol" ? "HIDDEN" : c === "ts" ? new Date(r.ts).toISOString() : c === "t0" || c === "t1" ? bjDate(r[c]) : r[c]))
+          .map((c) => q(c === "symbol" ? (r.revealed === true ? r.symbol : "HIDDEN") : c === "ts" ? new Date(r.ts).toISOString() : c === "t0" || c === "t1" ? (r.revealed === true ? bjDate(r[c]) : "HIDDEN") : r[c]))
           .join(","),
       ),
     );
@@ -286,7 +286,7 @@ function HelpBody({ onClose }: { onClose: () => void }) {
       <DialogHeader>
         <DialogTitle>怎么用</DialogTitle>
         <DialogDescription>
-          每一局随机抽一个币安 U 本位永续和一段历史行情。开局那根收盘记作 100，105 就是比开局高 5%。结束本局后揭盲，显示真实币种、时间和价格。
+          每一局随机抽一个币安 U 本位永续和一段历史行情。开局那根收盘记作 100，105 就是比开局高 5%。结束本局后自动揭盲，显示真实时间和价格；标的仍隐藏，真实标的只在导出的 CSV 里。
         </DialogDescription>
       </DialogHeader>
       <h3 className="sheet-h">播放</h3>
@@ -301,7 +301,7 @@ function HelpBody({ onClose }: { onClose: () => void }) {
       <h3 className="sheet-h">图表</h3>
       <p className="sheet-copy">滚轮缩放，拖拽平移。F 适应全部。左边可以画趋势线、射线、水平线和斐波那契，Esc 取消。图上方打开指标，按类型选，点一下加到主图或副图，参数在那张图上改。指标用 TA-Lib，只吃已经走出的 K 线。</p>
       <h3 className="sheet-h">脱敏</h3>
-      <p className="sheet-copy">盲测中标的、日历时间和绝对价格都先藏起来：开局那根收盘记作 100，纵轴是相对开局的百分比；时间轴显示相对开局的经过时间（+H:MM）；成交量用相对均量。结束本局揭盲后显示真实币种、时间和价格。</p>
+      <p className="sheet-copy">盲测中标的、日历时间和绝对价格都先藏起来：开局那根收盘记作 100，纵轴是相对开局的百分比；时间轴显示相对开局的第几天，例如 D12 04:00（D0 是开局那根，开局前显示负数，例如 D-1 23:55；时分是从开局那根算起的经过时间，不是真实钟点）；成交量用相对均量。结束本局揭盲后显示真实时间和价格；标的在界面上一直隐藏，揭盲成功的局在 CSV 里写真实标的，揭盲失败或旧存档写 HIDDEN。</p>
       <DialogFooter>
         <Button variant="primary" onClick={onClose}>知道了</Button>
       </DialogFooter>

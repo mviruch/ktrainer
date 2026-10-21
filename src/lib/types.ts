@@ -64,6 +64,8 @@ export type Round = {
   oid: number;
   liqs: number;
   done: boolean;
+  /** Set after settle once identity reveal succeeds; chart stays blind until then. */
+  revealed?: boolean;
   peeked: boolean;
   bust: boolean;
   startedAt: number;
@@ -141,6 +143,8 @@ export type RoundLog = {
   t1: number;
   /** Round start time; used to settle each round at most once. */
   startedAt?: number;
+  /** True only after identity reveal succeeded for this round. Missing (old saves) = not revealed. */
+  revealed?: boolean;
   list: FillRec[];
 };
 

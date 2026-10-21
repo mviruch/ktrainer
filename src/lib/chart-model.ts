@@ -1,3 +1,4 @@
+import { CANDLE_DOWN, CANDLE_UP } from "./constants";
 import { liqPrice, priceNow, uPnl } from "./engine";
 import { blindBaseOf, displayPrice, fmtNum, sgnU, uFmt } from "./format";
 import { bucketOpen, chartSlice } from "./frames";
@@ -42,19 +43,28 @@ export type ChartModel = {
   live: boolean;
 };
 
-const UP = "#37a74c";
-const DOWN = "#cf4f5f";
+const UP = CANDLE_UP;
+const DOWN = CANDLE_DOWN;
 
 function rgba(hex: string, a: number) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
+/**
+ * Session zero (seconds) for the blind D-day axis: open time of the opening bar (the one whose close = 100),
+ * i.e. base-interval bars[ctx - 1]. Shared by every view interval; bars + ctx are persisted, so it survives reload.
+ */
+export function sessionZero(round: Pick<Round, "bars" | "ctx">): number | null {
+  const b = round.bars[round.ctx - 1];
+  return b ? Math.floor(b.t / 1000) : null;
+}
+
 export function buildChartModel(round: Round, peekEnd: number | null, greenUp: boolean): ChartModel {
   const up = greenUp ? UP : DOWN;
   const down = greenUp ? DOWN : UP;
-  const blind = !round.done;
-  const base = blindBaseOf(round.bars, round.ctx, round.done);
+  const blind = !round.revealed;
+  const base = blindBaseOf(round.bars, round.ctx, !!round.revealed);
   const view = chartSlice(round, peekEnd);
   const played = view.bars.slice(0, view.cursor);
   const avg = played.reduce((a, b) => a + b.v, 0) / (played.length || 1) || 1;
@@ -134,5 +144,5 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
       break;
     }
   }
-  return { candles, volume, lines, marks, nowTime, t0: candles[0]?.time ?? null, blind, live: !round.done };
+  return { candles, volume, lines, marks, nowTime, t0: sessionZero(round), blind, live: !round.done };
 }

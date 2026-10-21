@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   CandlestickSeries,
   ColorType,
-  createChart,
+  createChartEx,
+  defaultHorzScaleBehavior,
+  TickMarkType,
   createSeriesMarkers,
   CrosshairMode,
   HistogramSeries,
@@ -18,6 +20,9 @@ import {
   type BarPrice,
   type MouseEventParams,
   type SeriesType,
+  type Mutable,
+  type TimeScalePoint,
+  type TickMarkWeightValue,
 } from "lightweight-charts";
 import { fmtNum } from "@/lib/format";
 import type { ChartModel } from "@/lib/chart-model";
@@ -128,13 +133,69 @@ function fmtAxis(time: Time) {
   return `${m}-${day} ${hh}:${mm}`;
 }
 
-/** Blind desensitized axis: elapsed from session t0 as +H:MM (no calendar leak). */
-function fmtRel(time: Time, t0: number) {
-  if (typeof time !== "number") return "";
-  const sec = Math.max(0, Math.floor(time - t0));
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  return `+${h}:${String(m).padStart(2, "0")}`;
+const DAY = 86400;
+const two = (n: number) => String(n).padStart(2, "0");
+
+/** Blind relative clock: D{day} HH:MM elapsed since session t0 — never a real date / weekday / clock. */
+function relParts(time: Time, t0: number) {
+  if (typeof time !== "number") return null;
+  // floor for negatives too: 5 min before zero → day -1, rem 86100 → "D-1 23:55".
+  const sec = Math.floor(time - t0);
+  const day = Math.floor(sec / DAY);
+  const rem = sec - day * DAY;
+  return { day, hm: `${two(Math.floor(rem / 3600))}:${two(Math.floor((rem % 3600) / 60))}` };
+}
+
+/** Full blind label (crosshair etc.): "D1250 04:00". */
+function fmtRelFull(time: Time, t0: number) {
+  const r = relParts(time, t0);
+  return r ? `D${r.day} ${r.hm}` : "";
+}
+
+/**
+ * Blind tick label. Tick type comes from RelDayBehavior weights:
+ * a relative-day boundary is DayOfMonth weight → "D12" (library draws max-weight ticks bold);
+ * intraday ticks → "04:00". When ticks are ≥1 day apart every tick is a day tick → "D125".
+ */
+function fmtRelTick(time: Time, type: TickMarkType, t0: number) {
+  const r = relParts(time, t0);
+  if (!r) return "";
+  return type === TickMarkType.Time || type === TickMarkType.TimeWithSeconds ? r.hm : `D${r.day}`;
+}
+
+const INTRADAY: [number, number][] = [
+  [12 * 3600, 33],
+  [6 * 3600, 32],
+  [3 * 3600, 31],
+  [3600, 30],
+  [1800, 22],
+  [300, 21],
+  [60, 20],
+];
+
+/** Tick weights from elapsed-since-t0 instead of UTC calendar, so day ticks land on D boundaries. */
+function relWeight(cur: number, prev: number): number {
+  if (Math.floor(cur / DAY) !== Math.floor(prev / DAY)) return 50; // TickMarkWeight.Day
+  for (const [div, w] of INTRADAY) if (Math.floor(cur / div) !== Math.floor(prev / div)) return w;
+  return 0;
+}
+
+const BaseBehavior = defaultHorzScaleBehavior();
+class RelDayBehavior extends BaseBehavior {
+  /** Session zero (seconds). null → stock calendar weights. */
+  t0: number | null = null;
+  fillWeightsForPoints(points: readonly Mutable<TimeScalePoint>[], startIndex = 0): void {
+    const t0 = this.t0;
+    if (t0 == null || !points.length) return super.fillWeightsForPoints(points, startIndex);
+    const at = (i: number) => (points[i].originalTime as number) - t0;
+    for (let i = Math.max(startIndex, 1); i < points.length; i++) {
+      points[i].timeWeight = relWeight(at(i), at(i - 1)) as TickMarkWeightValue;
+    }
+    if (startIndex === 0) {
+      const step = points.length > 1 ? at(1) - at(0) : 60;
+      points[0].timeWeight = relWeight(at(0), at(0) - step) as TickMarkWeightValue;
+    }
+  }
 }
 
 const lineStyle = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted, sparse: LineStyle.SparseDotted };
@@ -209,6 +270,9 @@ export function KlineChart({
   bindFit,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const behaviorRef = useRef<RelDayBehavior | null>(null);
+  // Set zero before any effect calls setData (candles, VOL, indicators all add time points).
+  if (behaviorRef.current) behaviorRef.current.t0 = model?.t0 ?? null;
   const api = useRef<Api | null>(null);
   const pin = useRef(true);
   const viewBars = useRef(140);
@@ -321,7 +385,10 @@ export function KlineChart({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const chart = createChart(el, {
+    const behavior = new RelDayBehavior();
+    behaviorRef.current = behavior;
+    behavior.t0 = modelRef.current?.t0 ?? null;
+    const chart = createChartEx<Time, RelDayBehavior>(el, behavior, {
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "#131722" },
@@ -608,17 +675,21 @@ export function KlineChart({
       priceFormat: { type: "custom", minMove: 0.00000001, formatter: (p: BarPrice) => fmtNum(Number(p), data.blind) },
     });
     const t0 = data.t0;
+    // Weights for new time points are computed on setData below; keep them on relative-day boundaries.
+    if (behaviorRef.current) behaviorRef.current.t0 = t0;
     a.chart.applyOptions({
       timeScale: {
         visible: true,
         timeVisible: true,
         secondsVisible: false,
         borderColor: "#2A2E39",
-        tickMarkFormatter: (time: Time) =>
-          data.blind && t0 != null ? fmtRel(time, t0) : data.blind ? "" : fmtAxis(time),
+        // Revealed labels are "MM-DD HH:MM" (11 chars); reserve room so they don't collide.
+        tickMarkMaxCharacterLength: data.blind ? undefined : 11,
+        tickMarkFormatter: (time: Time, type: TickMarkType) =>
+          data.blind && t0 != null ? fmtRelTick(time, type, t0) : data.blind ? "" : fmtAxis(time),
       },
       localization: {
-        timeFormatter: (time: Time) => (data.blind && t0 != null ? fmtRel(time, t0) : fmtAxis(time)),
+        timeFormatter: (time: Time) => (data.blind && t0 != null ? fmtRelFull(time, t0) : data.blind ? "" : fmtAxis(time)),
       },
     });
     a.bars.setData(

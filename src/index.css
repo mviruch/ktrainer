@@ -192,7 +192,7 @@ select, option { background: var(--panel); color: var(--chalk); }
 .tr-sec { display: flex; align-items: center; justify-content: space-between; font-size: 12px; min-height: 24px; margin-bottom: 8px; }
 .tr-sec b { font-weight: 500; }
 .tr-sec i { font-style: normal; color: var(--dim); font-weight: 400; }
-.tr-empty { font-size: 12px; color: var(--faint); padding: 4px 0 8px; }
+.tr-empty { font-size: 12px; color: var(--faint); padding-top: 4px; padding-bottom: 8px; } /* block-only so px-4 on result-panel can align it */
 .tr-poshd { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
 .tr-poshd b { margin-left: auto; font-size: 14px; font-weight: 600; }
 .tr-poshd small { font-size: 11px; font-weight: 500; }

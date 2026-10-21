@@ -3,6 +3,7 @@ import { intervalLabel } from "@/lib/frames";
 import { bjDate, fmtPrice, pctFmt, sgnU, uFmt } from "@/lib/format";
 import { useTrainer } from "@/state/trainer";
 import type { ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -46,6 +47,7 @@ export function ResultPanel() {
   const t = useTrainer();
   const r = t.result?.rec;
   if (!r) return null;
+  const rv = t.reveal?.status;
   const tone = r.pnl > 0 ? "text-up" : r.pnl < 0 ? "text-down" : "text-fg-2";
   const nextLabel = `下一局（本场第 ${(t.acc.runN || 0) + 1} 局）`;
   const kpi = (label: string, value: ReactNode, cls = "") => (
@@ -58,8 +60,8 @@ export function ResultPanel() {
     <div className="result-panel flex h-full min-h-0 flex-col">
       <div className="flex flex-col gap-3 px-4 pt-4 pb-3">
         <div className="flex items-center gap-2 text-[12px]">
-          <span className="size-1.5 rounded-full bg-brand" />
-          本局结束 · 已揭盲
+          <span className={`size-1.5 rounded-full ${rv === "fail" ? "bg-down" : rv === "ok" ? "bg-brand" : "animate-pulse bg-fg-3"}`} />
+          {rv === "ok" ? "本局结束 · 已揭盲" : rv === "fail" ? "本局结束 · 揭盲没成功" : "本局结束 · 揭盲中…"}
         </div>
         <div>
           <div className={`num text-[36px] leading-[44px] font-semibold ${tone}`}>{r.fills ? sgnU(r.pnl) : "0.00"}</div>
@@ -67,15 +69,31 @@ export function ResultPanel() {
             {r.fills ? `本局盈亏 USDT · ${pctFmt(r.pnl / r.startW)} · 已扣手续费` : "这一局没有交易"}
           </div>
         </div>
-        <div className="rounded-[4px] border border-line-strong bg-brand/5 px-3 py-2.5 text-[12px]">
-          <div className="flex justify-between">
-            <span className="text-fg-2">标的已隐藏</span>
+        <div id="reveal-box" data-reveal={rv ?? "none"} className="rounded-[4px] border border-line-strong bg-brand/5 px-3 py-2.5 text-[12px]">
+          <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+            <span className="whitespace-nowrap text-fg-2">{rv === "ok" || rv === "fail" ? "标的已隐藏" : "正在揭盲…"}</span>
             <span>周期 {intervalLabel(r.interval)}</span>
           </div>
-          <div className="num mt-1 text-[11px] leading-[18px] text-fg-2">
-            {bjDate(r.t0)} → {bjDate(r.t1)}
-            <span className="reveal-tz">（北京时间）</span>
-          </div>
+          {rv === "ok" && (
+            <div className="num mt-1 text-[11px] leading-[18px] text-fg-2">
+              {bjDate(r.t0)} → {bjDate(r.t1)}
+              <span className="reveal-tz">（北京时间）</span>
+            </div>
+          )}
+          {rv !== "ok" && rv !== "fail" && (
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-fg-3">
+              <Loader2 className="size-3 animate-spin" />
+              结算已完成，正在核对真实标的和时间
+            </div>
+          )}
+          {rv === "fail" && (
+            <div className="mt-1.5 flex items-center gap-2 text-[11px] leading-[18px] text-down">
+              <span className="min-w-0 flex-1">揭盲失败：{t.reveal?.error}</span>
+              <Button size="xs" className="shrink-0" onClick={t.retryReveal}>
+                重试
+              </Button>
+            </div>
+          )}
         </div>
         {t.result?.bust && (
           <div className="rounded-[4px] border border-liq/40 bg-liq/10 px-3 py-2.5 text-[12px] leading-[18px] text-liq">

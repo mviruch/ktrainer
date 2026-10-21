@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CANDLE_DOWN, CANDLE_UP } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -26,7 +27,7 @@ import {
   type LineDash,
 } from "@/lib/indicators";
 
-const HIST_SWATCHES = [HIST_UP, HIST_DOWN, "#37A74C", "#CF4F5F", "#8A939D", ...IND_COLORS];
+const HIST_SWATCHES = [HIST_UP, HIST_DOWN, CANDLE_UP, CANDLE_DOWN, "#8A939D", ...IND_COLORS];
 
 function Swatch({ value, colors, onChange, label }: { value: string; colors: string[]; onChange: (c: string) => void; label: string }) {
   return (

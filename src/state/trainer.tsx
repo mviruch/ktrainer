@@ -13,7 +13,7 @@ import {
   reversePos,
   setPosTpSl,
 } from "@/lib/engine";
-import { clearDeadHosts, drawSession, fetchMore } from "@/lib/market";
+import { clearDeadHosts, drawSession, fetchMore, revealWindow } from "@/lib/market";
 import {
   clearRound,
   findSettledRound,
@@ -63,6 +63,8 @@ type Box = {
   result: { rec: RoundLog; bust: boolean } | null;
   peekEnd: number | null;
   peeking: boolean;
+  /** Identity reveal after settle: loading → ok | fail (with message). */
+  reveal: { status: "loading" | "ok" | "fail"; error?: string } | null;
   dialog: DialogState;
   loadMsg: string;
   tok: number;
@@ -104,6 +106,7 @@ export type Trainer = Box & {
   closeDialog: () => void;
   toastMsg: (m: string, ms?: number) => void;
   retry: () => void;
+  retryReveal: () => void;
   fit: () => void;
   bindFit: (fn: (() => void) | null) => void;
   maxLong: () => number;
@@ -133,6 +136,7 @@ function createBox(): Box {
     result: null,
     peekEnd: null,
     peeking: false,
+    reveal: null,
     dialog: null,
     loadMsg: "",
     tok: 0,
@@ -240,6 +244,8 @@ function createApi(box: { current: Box }, bump: () => void) {
     box.current.result = { rec, bust };
     box.current.phase = "result";
     box.current.dialog = null;
+    // Settle first (stats already written above, idempotent), then auto-reveal identity.
+    void revealIdentity();
     const run = !prior && box.current.acc.runN >= FIXED.runSize ? closeRun() : null;
     bump();
     if (run) {
@@ -327,6 +333,30 @@ function createApi(box: { current: Box }, bump: () => void) {
     else bump();
   }
 
+  async function revealIdentity() {
+    const t = box.current.round;
+    if (!t || !t.done || t.revealed) return;
+    box.current.reveal = { status: "loading" };
+    bump();
+    try {
+      await revealWindow(t.symbol, t.interval, t.bars[t.ctx]?.t ?? NaN);
+      if (box.current.round !== t) return;
+      t.revealed = true;
+      box.current.reveal = { status: "ok" };
+      // Mark the settled log row so CSV may export the real symbol for this round only.
+      const rec = box.current.result?.rec;
+      if (rec && !rec.revealed) {
+        rec.revealed = true;
+        box.current.log = box.current.log.map((r) => (r === rec || (rec.startedAt != null && r.startedAt === rec.startedAt) ? { ...r, revealed: true } : r));
+        saveLog(box.current.log);
+      }
+    } catch (e) {
+      if (box.current.round !== t) return;
+      box.current.reveal = { status: "fail", error: e instanceof Error ? e.message : "揭盲失败" };
+    }
+    bump();
+  }
+
   async function revealPeek() {
     const t = box.current.round;
     if (!t) return;
@@ -359,6 +389,7 @@ function createApi(box: { current: Box }, bump: () => void) {
     box.current.round = null;
     box.current.result = null;
     box.current.peekEnd = null;
+    box.current.reveal = null;
     box.current.errors = [];
     box.current.dialog = null;
     bump();
@@ -640,6 +671,11 @@ function createApi(box: { current: Box }, bump: () => void) {
       bump();
     },
     toastMsg,
+    retryReveal() {
+      // A failed reveal marks hosts dead; a manual retry should really hit the network again.
+      clearDeadHosts();
+      void revealIdentity();
+    },
     retry() {
       clearDeadHosts();
       void start();
@@ -714,6 +750,7 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
       result: s.result,
       peekEnd: s.peekEnd,
       peeking: s.peeking,
+      reveal: s.reveal,
       dialog: s.dialog,
       loadMsg: s.loadMsg,
       tok: s.tok,

@@ -253,6 +253,7 @@ export function Stage() {
         round.cursor,
         round.bars.length,
         round.done ? 1 : 0,
+        round.revealed ? 1 : 0,
         round.wallet,
         round.fills.length,
         round.orders.map((o) => `${o.id}:${o.price}`).join(","),
@@ -266,7 +267,7 @@ export function Stage() {
     if (!round || !inds.length) return;
     let dead = false;
     const slice = chartSlice(round, peekEnd);
-    const base = blindBaseOf(round.bars, round.ctx, round.done);
+    const base = blindBaseOf(round.bars, round.ctx, !!round.revealed);
     computeIndicators(slice.bars.slice(0, slice.end), inds, base, greenUp).then(
       (next) => {
         if (!dead) setPlots(next);
@@ -384,7 +385,7 @@ export function Stage() {
           indError={indError}
           ohlc={ohlc}
           indReadout={indReadout}
-          blind={!!round && !round.done}
+          blind={!!round && !round.revealed}
           onView={t.setView}
           onAdd={addInd}
           onRemove={(id) => commitInds(inds.filter((inst) => inst.id !== id))}
@@ -426,7 +427,7 @@ export function Stage() {
           cursor={round?.cursor ?? 0}
           viewKey={round ? activeView(round) : ""}
           greenUp={t.cfg.greenUp}
-          priceBase={round ? blindBaseOf(round.bars, round.ctx, round.done) : null}
+          priceBase={round ? blindBaseOf(round.bars, round.ctx, !!round.revealed) : null}
           drawings={round?.drawings ?? []}
           draft={draft}
           selectedId={selectedId}
