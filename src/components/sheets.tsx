@@ -14,6 +14,7 @@ import { FEE_TAKER, FIXED, IV_CN, IV_OK, LEV_CHIPS, LEV_MAX, POOLS, SPEED_MAX, S
 import { availBal, opp, priceNow, slipPx, uPnl } from "@/lib/engine";
 import { bjDate, fmtPrice, parsePrice, sgnU, uFmt, filterDecimal } from "@/lib/format";
 import { download, statsOf } from "@/lib/stats";
+import { exportJson } from "@/lib/export-json";
 import { store } from "@/lib/store";
 import type { Pool } from "@/lib/types";
 import { useTrainer } from "@/state/trainer";
@@ -177,7 +178,7 @@ function StatsBody(_props: { onClose: () => void }) {
         <Button
           variant="secondary"
           disabled={!s.n}
-          onClick={() => download("合约训练记录.json", JSON.stringify({ account: t.acc, runs: t.runs, rounds: t.log }, null, 2), "application/json")}
+          onClick={() => download("合约训练记录.json", exportJson(t.acc, t.runs, t.log), "application/json")}
         >
           导出 JSON
         </Button>

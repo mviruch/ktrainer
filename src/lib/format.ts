@@ -73,3 +73,22 @@ export function filterDecimal(raw: string) {
   }
   return out;
 }
+
+export const DAY = 86400;
+const two = (n: number) => String(n).padStart(2, "0");
+
+/** Blind relative clock: D{day} HH:MM elapsed since session t0 (unix sec) — never a real date / weekday / clock. */
+export function relParts(time: unknown, t0: number) {
+  if (typeof time !== "number") return null;
+  // floor for negatives too: 5 min before zero → day -1, rem 86100 → "D-1 23:55".
+  const sec = Math.floor(time - t0);
+  const day = Math.floor(sec / DAY);
+  const rem = sec - day * DAY;
+  return { day, hm: `${two(Math.floor(rem / 3600))}:${two(Math.floor((rem % 3600) / 60))}` };
+}
+
+/** Full blind label (crosshair, export): "D1250 04:00". time / t0 in unix seconds. */
+export function fmtRelFull(time: unknown, t0: number) {
+  const r = relParts(time, t0);
+  return r ? `D${r.day} ${r.hm}` : "";
+}

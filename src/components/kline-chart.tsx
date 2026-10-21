@@ -24,7 +24,7 @@ import {
   type TimeScalePoint,
   type TickMarkWeightValue,
 } from "lightweight-charts";
-import { fmtNum } from "@/lib/format";
+import { DAY, fmtNum, fmtRelFull, relParts } from "@/lib/format";
 import type { ChartModel } from "@/lib/chart-model";
 import { DrawPrimitive } from "@/components/draw-primitive";
 import { NowPrimitive } from "@/components/now-primitive";
@@ -133,24 +133,6 @@ function fmtAxis(time: Time) {
   return `${m}-${day} ${hh}:${mm}`;
 }
 
-const DAY = 86400;
-const two = (n: number) => String(n).padStart(2, "0");
-
-/** Blind relative clock: D{day} HH:MM elapsed since session t0 — never a real date / weekday / clock. */
-function relParts(time: Time, t0: number) {
-  if (typeof time !== "number") return null;
-  // floor for negatives too: 5 min before zero → day -1, rem 86100 → "D-1 23:55".
-  const sec = Math.floor(time - t0);
-  const day = Math.floor(sec / DAY);
-  const rem = sec - day * DAY;
-  return { day, hm: `${two(Math.floor(rem / 3600))}:${two(Math.floor((rem % 3600) / 60))}` };
-}
-
-/** Full blind label (crosshair etc.): "D1250 04:00". */
-function fmtRelFull(time: Time, t0: number) {
-  const r = relParts(time, t0);
-  return r ? `D${r.day} ${r.hm}` : "";
-}
 
 /**
  * Blind tick label. Tick type comes from RelDayBehavior weights:

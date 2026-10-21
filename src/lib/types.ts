@@ -145,6 +145,8 @@ export type RoundLog = {
   startedAt?: number;
   /** True only after identity reveal succeeded for this round. Missing (old saves) = not revealed. */
   revealed?: boolean;
+  /** Blind price base (close of bars[ctx-1], same as the chart's 100). Missing on old saves. */
+  base?: number;
   list: FillRec[];
 };
 

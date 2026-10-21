@@ -1,5 +1,6 @@
 import { FIXED, IV_OK, LEV_MAX, SPEED_MAX, SPEED_MIN } from "./constants";
 import { store } from "./store";
+import { blindBaseOf } from "./format";
 import { defaultParams, defOf, styleOf, type IndInst, type IndKind, type IndStyle } from "./indicators";
 import type { Account, Anchor, Bar, Config, Drawing, DrawStyle, Frame, Interval, OrderTab, Pool, Pos, Round, RoundLog, RunLog } from "./types";
 
@@ -329,6 +330,7 @@ export function toLog(t: Round, reason: string): RoundLog {
     t0: t.bars[t.ctx - 1].t,
     t1: t.bars[t.cursor - 1].t,
     startedAt: t.startedAt,
+    ...(blindBaseOf(t.bars, t.ctx, false) != null ? { base: blindBaseOf(t.bars, t.ctx, false)! } : {}),
     list: t.fills.slice(0, 80).map((f) => ({
       i: f.i - t.ctx + 1,
       side: f.side,
