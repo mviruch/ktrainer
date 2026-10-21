@@ -1,5 +1,6 @@
-import { FIXED, IV_OK, LEV_MAX, SPEED_MAX, SPEED_MIN } from "./constants";
+import { FILL_CAP, FIXED, IV_OK, LEV_MAX, SPEED_MAX, SPEED_MIN } from "./constants";
 import { store } from "./store";
+import { appendReview, REVIEW_KEY, type ReviewRec } from "./review-store";
 import { blindBaseOf } from "./format";
 import { defaultParams, defOf, styleOf, type IndInst, type IndKind, type IndStyle } from "./indicators";
 import type { Account, Anchor, Bar, Config, Drawing, DrawStyle, Frame, Interval, OrderTab, Pool, Pos, Round, RoundLog, RunLog } from "./types";
@@ -59,6 +60,20 @@ export function saveLog(rows: RoundLog[]) {
   store.set("fut-log", rows.length > 600 ? rows.slice(-600) : rows);
 }
 
+export function loadReviews(): ReviewRec[] {
+  const v = store.get<ReviewRec[]>(REVIEW_KEY, []);
+  return Array.isArray(v) ? v.filter((r) => r && typeof r.startedAt === "number") : [];
+}
+
+/** Append / replace one round's review detail. Returns false when the write failed. */
+export function saveReview(rec: ReviewRec) {
+  return store.set(REVIEW_KEY, appendReview(loadReviews(), rec));
+}
+
+export function clearReviews() {
+  store.del(REVIEW_KEY);
+}
+
 export function loadRuns() {
   const v = store.get<RunLog[]>("fut-runs", []);
   return Array.isArray(v) ? v : [];
@@ -112,8 +127,11 @@ export function saveRound(t: Round) {
     cursor: t.cursor,
     bars: packBars(t.bars),
     pos: t.pos,
-    orders: t.orders,
-    fills: t.fills,
+    // Snapshots stay in memory only until stage 2 (IndexedDB); keep fut-round small.
+    orders: t.orders.map((o) => ({ ...o, snap: undefined })),
+    fills: t.fills.map((f) => ({ ...f, snap: undefined })),
+    events: t.events ?? [],
+    posStats: t.posStats ?? [],
     wallet: t.wallet,
     startWallet: t.startWallet,
     fees: t.fees,
@@ -156,6 +174,8 @@ export function loadRound(): Round | null {
     peeked?: boolean;
     startedAt?: number;
     drawings?: unknown;
+    events?: Round["events"];
+    posStats?: Round["posStats"];
   } | null>("fut-round", null);
   if (!r || r.v !== 1 || !Array.isArray(r.bars) || !(r.cursor && r.cursor > 0)) return null;
   if (!r.symbol || !r.interval || !isInterval(r.interval) || !r.ctx) return null;
@@ -187,6 +207,9 @@ export function loadRound(): Round | null {
     bust: false,
     startedAt: r.startedAt ?? Date.now(),
     drawings: unpackDrawings(r.drawings),
+    events: Array.isArray(r.events) ? r.events : [],
+    posStats: Array.isArray(r.posStats) ? r.posStats : [],
+    endDrawings: null,
   };
 }
 
@@ -331,7 +354,7 @@ export function toLog(t: Round, reason: string): RoundLog {
     t1: t.bars[t.cursor - 1].t,
     startedAt: t.startedAt,
     ...(blindBaseOf(t.bars, t.ctx, false) != null ? { base: blindBaseOf(t.bars, t.ctx, false)! } : {}),
-    list: t.fills.slice(0, 80).map((f) => ({
+    list: t.fills.slice(0, FILL_CAP).map((f) => ({
       i: f.i - t.ctx + 1,
       side: f.side,
       tag: f.tag,

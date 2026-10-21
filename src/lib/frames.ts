@@ -1,5 +1,5 @@
-import { IV_CN, IV_MS, IV_OK } from "./constants";
-import type { Bar, Interval, Round } from "./types";
+import { IV_CN, IV_MS, IV_OK } from "./constants.ts";
+import type { Bar, Interval, Round } from "./types.ts";
 
 export function bucketOpen(t: number, ms: number) {
   return Math.floor(t / ms) * ms;
@@ -70,4 +70,22 @@ export function chartSlice(round: Round, peekEnd: number | null): ChartSlice {
   const played = project(round, round.cursor, iv);
   const shown = end === round.cursor ? played : project(round, end, iv);
   return { bars: shown, cursor: Math.min(played.length, shown.length), end: shown.length, interval: iv };
+}
+
+/** Bars of `iv` that are fully closed at round.cursor (no forming bar). null = interval not in this round
+ *  ("short": shorter than base, "missing": longer frame was not fetched). */
+export function closedBars(round: Round, iv: Interval): { bars: Bar[]; derived?: boolean } | { bars: null; why: "short" } {
+  const ms = IV_MS[iv];
+  const baseMs = IV_MS[round.interval] || ms;
+  if (ms < baseMs) return { bars: null, why: "short" };
+  const n = Math.max(1, Math.min(round.cursor, round.bars.length));
+  const now = round.bars[n - 1].t + baseMs;
+  if (iv === round.interval) return { bars: round.bars.slice(0, n) };
+  if (round.frames.some((f) => f.interval === iv)) return { bars: project(round, n, iv).filter((b) => b.t + ms <= now) };
+  /* Frame not loaded (e.g. symbol listed at bars[0]: loadFrames keeps nothing before it and drops the frame).
+     Snapshot-only fallback: aggregate the played base bars; drop a first bucket that starts before bars[0]
+     (it would be partial). Chart / fetching unchanged. */
+  const agg = aggregate(round.bars.slice(0, n), ms).filter((b) => b.t + ms <= now);
+  if (agg.length && agg[0].t < round.bars[0].t) agg.shift();
+  return { bars: agg, derived: true };
 }

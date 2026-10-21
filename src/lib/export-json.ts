@@ -1,5 +1,5 @@
-import { fmtRelFull } from "./format";
-import type { Account, RoundLog, RunLog } from "./types";
+import { fmtRelFull } from "./format.ts";
+import type { Account, RoundLog, RunLog } from "./types.ts";
 
 /**
  * Desensitised copy of the stats export (「导出 JSON」). Pure: never mutates the inputs / local saves.

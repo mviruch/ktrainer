@@ -54,3 +54,6 @@ export const NOT_COIN = /^(USDC|FDUSD|TUSD|BUSD|USDP|USDE|USD1|BTCDOM|DEFI|FOOTB
 /** Candle body colors (green-up base); chart and VOL sub-pane share these. */
 export const CANDLE_UP = "#37A74C";
 export const CANDLE_DOWN = "#CF4F5F";
+
+/** Per-round fill cap kept in the round log (was 80). */
+export const FILL_CAP = 500;

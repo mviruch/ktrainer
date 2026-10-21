@@ -182,6 +182,9 @@ function StatsBody(_props: { onClose: () => void }) {
         >
           导出 JSON
         </Button>
+        <Button variant="secondary" disabled={!s.n} onClick={() => void t.exportReview()}>
+          复盘详细导出
+        </Button>
         <Button variant="primary" onClick={csv} disabled={!s.n}>导出 CSV</Button>
       </DialogFooter>
     </DialogContent>
@@ -397,9 +400,15 @@ export function ActionSheets() {
             <DialogTitle>清空记录</DialogTitle>
             <DialogDescription>清空全部记录和场次，余额回到 10,000 U。不能恢复。</DialogDescription>
           </DialogHeader>
+          <p className="text-[12px] leading-[20px] text-fg-2">
+            会同时清掉复盘详情（成交明细、委托事件、持仓统计、画线）和 K 线快照。清之前建议先导出。
+          </p>
+          <Button variant="secondary" size="sm" className="self-start" onClick={() => void t.exportReview()}>
+            先导出复盘详细
+          </Button>
           <DialogFooter className="flex-row-reverse justify-start">
             <Button
-              variant="primary"
+              variant="destructive"
               onClick={() => {
                 const res = t.wipe();
                 if (!res.ok) t.toastMsg(res.error, 3000);

@@ -1,5 +1,74 @@
-import { FEE_MAKER, FEE_TAKER, MMR } from "./constants";
-import type { ActResult, Bar, Drawn, Order, OrderDraft, Pos, Round, Side } from "./types";
+import { FEE_MAKER, FEE_TAKER, MMR } from "./constants.ts";
+import { snapDrawings, takeSnapshot } from "./snapshot.ts";
+import type { ActResult, Bar, CaptureIn, CloseReason, Drawn, EventKind, EventSrc, Fill, Order, OrderDraft, Pos, PosStat, Round, Side, Snapshot } from "./types.ts";
+
+/* ---------- review capture helpers ---------- */
+
+function barT(t: Round, i: number) {
+  return t.bars[i]?.t ?? 0;
+}
+
+function pushEv(
+  t: Round,
+  kind: EventKind,
+  src: EventSrc,
+  i: number,
+  oid: number | null,
+  price: number | null,
+  side: Side | null,
+  extra: { tp?: number | null; sl?: number | null; why?: string; posId?: number | null } = {},
+) {
+  if (!t.events) t.events = [];
+  t.events.push({ kind, i, t: barT(t, i), oid, price, side, src, ...extra });
+}
+
+function statOf(t: Round, pid: number | undefined) {
+  return pid == null ? undefined : (t.posStats ?? []).find((s) => s.id === pid);
+}
+
+function refreshStat(s: PosStat) {
+  const fav = s.side > 0 ? s.hi : s.lo;
+  const adv = s.side > 0 ? s.lo : s.hi;
+  s.mfePx = fav;
+  s.maePx = adv;
+  const dFav = Math.max(0, s.side * (fav - s.entry));
+  const dAdv = Math.max(0, -s.side * (adv - s.entry));
+  s.mfeR = s.risk ? dFav / s.risk : null;
+  s.maeR = s.risk ? dAdv / s.risk : null;
+  s.rMult = s.riskU ? s.pnl / s.riskU : null;
+}
+
+function touchStat(s: PosStat, p: number) {
+  if (p > s.hi) s.hi = p;
+  if (p < s.lo) s.lo = p;
+  refreshStat(s);
+}
+
+function setSl0(s: PosStat, sl: number) {
+  s.sl0 = sl;
+  s.risk = Math.abs(s.entry - sl) || null;
+  s.riskU = s.risk ? s.risk * s.qty0 : null;
+  refreshStat(s);
+}
+
+function closeStat(t: Round, pid: number | undefined, idx: number, price: number, reason: CloseReason) {
+  const s = statOf(t, pid);
+  if (!s || s.closeI != null) return;
+  touchStat(s, price);
+  s.closeI = idx;
+  s.bars = idx - s.openI;
+  s.reason = reason;
+  refreshStat(s);
+}
+
+type FillMeta = {
+  oid: number;
+  orderPrice: number | null;
+  /** Reason used if this fill closes a position. */
+  reason: CloseReason;
+  view: Fill["view"];
+  snap: Snapshot | null;
+};
 
 const slipOf = (sym: string) => (sym === "BTCUSDT" || sym === "ETHUSDT" ? 0.0001 : 0.0003);
 
@@ -95,6 +164,13 @@ function openPos(t: Round, side: Side, qty: number, price: number, lev: number, 
     sl: null,
     openIdx: idx,
   };
+  if (!t.posStats) t.posStats = [];
+  const id = t.posStats.reduce((m, x) => Math.max(m, x.id), 0) + 1;
+  t.pos.pid = id;
+  t.posStats.push({
+    id, side, openI: idx, closeI: null, bars: null, entry: price, qty0: qty, sl0: null, risk: null, riskU: null,
+    hi: price, lo: price, mfePx: price, maePx: price, mfeR: null, maeR: null, pnl: 0, rMult: null, adds: 0, reason: null,
+  });
   return closeQ > 0 ? "反手开" + (side > 0 ? "多" : "空") : "开" + (side > 0 ? "多" : "空");
 }
 
@@ -108,19 +184,33 @@ function applyFill(
   type: string,
   lev: number,
   mode: Pos["mode"],
-  why?: string,
-) {
-  if (!(qty > 0) || !(price > 0)) return;
+  why: string | undefined,
+  m: FillMeta,
+): Fill | null {
+  if (!(qty > 0) || !(price > 0)) return null;
   const P = t.pos;
+  const tp0 = P?.tp ?? null;
+  const sl0 = P?.sl ?? null;
   let closeQ = 0;
   let realized = 0;
+  let posId: number | null = null;
   if (P && P.side !== side) {
     closeQ = Math.min(qty, P.qty);
     realized = P.side * closeQ * (price - P.entry);
     if (P.mode === "isolated") P.margin -= (P.margin * closeQ) / P.qty;
     P.qty -= closeQ;
-    if (P.qty * price < 1e-6) t.pos = null;
+    posId = P.pid ?? null;
+    const st = statOf(t, P.pid);
+    if (st) {
+      st.pnl += realized;
+      touchStat(st, price);
+    }
+    if (P.qty * price < 1e-6) {
+      t.pos = null;
+      closeStat(t, P.pid, idx, price, m.reason);
+    }
   }
+  let openPosId: number | null = null;
   const openQ = qty - closeQ;
   const L = side > 0 ? "多" : "空";
   const oppL = side > 0 ? "空" : "多";
@@ -132,13 +222,23 @@ function applyFill(
       t.pos.qty = Q;
       if (t.pos.mode === "isolated") t.pos.margin += (openQ * price) / t.pos.lev;
       tag = "加" + L;
-    } else tag = openPos(t, side, openQ, price, lev, mode, idx, closeQ);
+      const st = statOf(t, t.pos.pid);
+      if (st) {
+        st.adds++;
+        touchStat(st, price);
+      }
+      posId = t.pos.pid ?? null;
+    } else {
+      tag = openPos(t, side, openQ, price, lev, mode, idx, closeQ);
+      openPosId = (t.pos as Pos | null)?.pid ?? null;
+      if (posId == null) posId = openPosId;
+    }
   } else tag = "平" + oppL;
   const fee = qty * price * feeRate;
   t.wallet += realized - fee;
   t.fees += fee;
   t.realized += realized;
-  t.fills.push({
+  const rec: Fill = {
     i: idx,
     side,
     qty,
@@ -148,21 +248,51 @@ function applyFill(
     n: qty * price,
     tag: why ? why + (closeQ > 0 ? "·平" + oppL : "") : tag,
     type,
-  });
+    oid: m.oid,
+    t: barT(t, idx),
+    view: m.view,
+    lev,
+    tp: closeQ > 0 ? tp0 : (t.pos?.tp ?? null),
+    sl: closeQ > 0 ? sl0 : (t.pos?.sl ?? null),
+    orderPrice: m.orderPrice,
+    reason: closeQ > 0 ? m.reason : null,
+    posId,
+    openPosId,
+    snap: m.snap,
+  };
+  t.fills.push(rec);
+  return rec;
+}
+
+/** Attach the order's TP/SL to the position it opened / added to; first-open SL fixes R. */
+function attachTpSl(t: Round, f: Fill | null, side: Side, tp: number | null, sl: number | null, oid: number) {
+  if (!f || !t.pos || t.pos.side !== side) return;
+  if (tp) t.pos.tp = tp;
+  if (sl) t.pos.sl = sl;
+  if (tp || sl) pushEv(t, "tpsl", "order", f.i, oid, f.price, side, { tp: t.pos.tp, sl: t.pos.sl, why: "随单设置", posId: t.pos.pid ?? null });
+  const st = statOf(t, t.pos.pid);
+  if (st && f.openPosId === st.id && st.sl0 == null && sl) setSl0(st, sl);
+  f.tp = t.pos.tp;
+  f.sl = t.pos.sl;
 }
 
 function fillOrder(t: Round, o: Order, price: number, idx: number, lev: number, mode: Pos["mode"], msgs: string[]) {
   t.orders = t.orders.filter((x) => x !== o);
   const nm = needMargin(t, lev, o.side, o.qty, price, FEE_MAKER, o.id);
   if (nm.im + nm.fee > availBal(t) + 1e-6) {
+    pushEv(t, "cancel", "limit", idx, o.id, o.price, o.side, { why: "保证金不足，触发时自动撤单" });
     msgs.push("保证金不足，一笔限价单成交不了，已撤销");
     return;
   }
-  applyFill(t, o.side, o.qty, price, FEE_MAKER, idx, "限价", lev, mode);
-  if (t.pos && t.pos.side === o.side) {
-    if (o.tp) t.pos.tp = o.tp;
-    if (o.sl) t.pos.sl = o.sl;
-  }
+  pushEv(t, "trigger", "limit", idx, o.id, price, o.side, { posId: t.pos?.pid ?? null });
+  const f = applyFill(t, o.side, o.qty, price, FEE_MAKER, idx, "限价", lev, mode, undefined, {
+    oid: o.id,
+    orderPrice: o.price,
+    reason: "manual",
+    view: o.view ?? null,
+    snap: o.snap ?? null,
+  });
+  attachTpSl(t, f, o.side, o.tp, o.sl, o.id);
 }
 
 function liquidate(t: Round, at: number, idx: number, msgs: string[]) {
@@ -178,6 +308,12 @@ function liquidate(t: Round, at: number, idx: number, msgs: string[]) {
   const paidFee = Math.max(0, Math.min(fee, raw - (t.wallet - before)));
   t.realized += raw;
   t.fees += paidFee;
+  const oid = t.oid++;
+  pushEv(t, "trigger", "liq", idx, oid, at, opp(P.side), { posId: P.pid ?? null });
+  const st = statOf(t, P.pid);
+  if (st) st.pnl += raw;
+  closeStat(t, P.pid, idx, at, "liq");
+  for (const o of t.orders) pushEv(t, "cancel", "liq", idx, o.id, o.price, o.side, { why: "强平后撤单" });
   t.fills.push({
     i: idx,
     side: opp(P.side),
@@ -188,6 +324,17 @@ function liquidate(t: Round, at: number, idx: number, msgs: string[]) {
     n: q * at,
     tag: "强平·平" + (P.side > 0 ? "多" : "空"),
     type: "强平",
+    oid,
+    t: barT(t, idx),
+    view: null,
+    lev: P.lev,
+    tp: P.tp,
+    sl: P.sl,
+    orderPrice: at,
+    reason: "liq",
+    posId: P.pid ?? null,
+    openPosId: null,
+    snap: null,
   });
   t.pos = null;
   t.orders = [];
@@ -244,6 +391,9 @@ function runSeg(
     } else if (t.pos) {
       const P = t.pos;
       const side = opp(P.side);
+      const oid = t.oid++;
+      const k = best.kind === "tp" ? "tp" : "sl";
+      pushEv(t, "trigger", k, idx, oid, at, side, { posId: P.pid ?? null });
       applyFill(
         t,
         side,
@@ -255,6 +405,7 @@ function runSeg(
         lev,
         mode,
         best.kind === "tp" ? "止盈" : "止损",
+        { oid, orderPrice: at, reason: k, view: null, snap: null },
       );
     }
     cur = best.t;
@@ -274,13 +425,18 @@ export function advance(t: Round, lev: number, mode: Pos["mode"]) {
   t.cursor++;
   const toasts: string[] = [];
   processBar(t, lev, mode, k, prevC, t.cursor - 1, toasts);
+  const st = statOf(t, t.pos?.pid);
+  if (st && st.closeI == null && st.openI < t.cursor - 1) {
+    touchStat(st, k.h);
+    touchStat(st, k.l);
+  }
   const eq = equityAt(t, k.c);
   if (eq > t.peakEq) t.peakEq = eq;
   if (t.peakEq > 0) t.maxDD = Math.max(t.maxDD, (t.peakEq - eq) / t.peakEq);
   return { needMore: false, toasts };
 }
 
-export function placeOrder(t: Round, d: OrderDraft, mode: Pos["mode"]): ActResult {
+export function placeOrder(t: Round, d: OrderDraft, mode: Pos["mode"], cap?: CaptureIn): ActResult {
   if (t.done) return { ok: false, error: "这一局已经结束" };
   if (!(d.notional > 0)) return { ok: false, error: "先填数量（USDT）" };
   const p = priceNow(t);
@@ -314,11 +470,17 @@ export function placeOrder(t: Round, d: OrderDraft, mode: Pos["mode"]): ActResul
     const closeIM = t.pos && nm.closeQ > 0 ? (posIM(t, p) * nm.closeQ) / t.pos.qty : 0;
     if (nm.im + nm.fee > availBal(t, p) + closeIM + 1e-6)
       return { ok: false, error: "可用保证金不足，减少数量或加杠杆" };
-    applyFill(t, d.side, qty, fill, FEE_TAKER, idx, d.tab === "market" ? "市价" : "限价·吃单", d.lev, mode);
-    if (t.pos && t.pos.side === d.side) {
-      if (d.tp) t.pos.tp = d.tp;
-      if (d.sl) t.pos.sl = d.sl;
-    }
+    const oid = t.oid++;
+    const src = d.tab === "market" ? "market" : "limit";
+    pushEv(t, "trigger", src, idx, oid, fill, d.side, { posId: t.pos?.pid ?? null });
+    const f = applyFill(t, d.side, qty, fill, FEE_TAKER, idx, d.tab === "market" ? "市价" : "限价·吃单", d.lev, mode, undefined, {
+      oid,
+      orderPrice: d.tab === "market" ? null : price,
+      reason: "manual",
+      view: cap?.view ?? t.view,
+      snap: takeSnapshot(t, cap),
+    });
+    attachTpSl(t, f, d.side, d.tp, d.sl, oid);
     return d.tab === "limit"
       ? { ok: true, info: "限价单价格已经穿过最新价，直接按市价成交（收吃单手续费）" }
       : { ok: true };
@@ -326,8 +488,9 @@ export function placeOrder(t: Round, d: OrderDraft, mode: Pos["mode"]): ActResul
   const qty = d.notional / price;
   const nm = needMargin(t, d.lev, d.side, qty, price, FEE_MAKER);
   if (nm.im + nm.fee > availBal(t, p) + 1e-6) return { ok: false, error: "可用保证金不足，减少数量或加杠杆" };
+  const oid = t.oid++;
   t.orders.push({
-    id: t.oid++,
+    id: oid,
     side: d.side,
     price,
     qty,
@@ -335,19 +498,35 @@ export function placeOrder(t: Round, d: OrderDraft, mode: Pos["mode"]): ActResul
     tp: d.tp,
     sl: d.sl,
     at: idx,
+    view: cap?.view ?? t.view,
+    snap: takeSnapshot(t, cap),
   });
+  pushEv(t, "place", "limit", idx, oid, price, d.side, { tp: d.tp, sl: d.sl });
   return { ok: true, info: `已挂${d.side > 0 ? "买" : "卖"}单` };
 }
 
-export function closePct(t: Round, f: number, lev: number, mode: Pos["mode"]) {
-  if (!t.pos) return;
-  const P = t.pos;
+function manualMarket(t: Round, side: Side, qty: number, lev: number, mode: Pos["mode"], cap: CaptureIn | undefined) {
   const p = priceNow(t);
-  const side = opp(P.side);
-  applyFill(t, side, P.qty * f, slipPx(t, side, p), FEE_TAKER, t.cursor - 1, "市价", lev, mode);
+  const idx = t.cursor - 1;
+  const fill = slipPx(t, side, p);
+  const oid = t.oid++;
+  pushEv(t, "trigger", "market", idx, oid, fill, side, { posId: t.pos?.pid ?? null });
+  return applyFill(t, side, qty, fill, FEE_TAKER, idx, "市价", lev, mode, undefined, {
+    oid,
+    orderPrice: null,
+    reason: "manual",
+    view: cap?.view ?? t.view,
+    snap: takeSnapshot(t, cap),
+  });
 }
 
-export function reversePos(t: Round, lev: number, mode: Pos["mode"]): ActResult {
+export function closePct(t: Round, f: number, lev: number, mode: Pos["mode"], cap?: CaptureIn) {
+  if (!t.pos) return;
+  const P = t.pos;
+  manualMarket(t, opp(P.side), P.qty * f, lev, mode, cap);
+}
+
+export function reversePos(t: Round, lev: number, mode: Pos["mode"], cap?: CaptureIn): ActResult {
   if (!t.pos) return { ok: false, error: "没有持仓" };
   const P = t.pos;
   const p = priceNow(t);
@@ -357,12 +536,20 @@ export function reversePos(t: Round, lev: number, mode: Pos["mode"]): ActResult 
   const nm = needMargin(t, lev, side, qty, fill, FEE_TAKER, "now");
   if (nm.im + nm.fee > availBal(t, p) + posIM(t, p) + 1e-6)
     return { ok: false, error: "保证金不够反手同样大小的仓位" };
-  applyFill(t, side, qty, fill, FEE_TAKER, t.cursor - 1, "市价", lev, mode);
+  manualMarket(t, side, qty, lev, mode, cap);
   return { ok: true };
 }
 
-export function cancelOrder(t: Round, id: number) {
-  t.orders = t.orders.filter((o) => o.id !== id);
+export function cancelOrder(t: Round, id: number, why = "手动撤单") {
+  const o = t.orders.find((x) => x.id === id);
+  if (!o) return;
+  pushEv(t, "cancel", "manual", t.cursor - 1, o.id, o.price, o.side, { why });
+  t.orders = t.orders.filter((x) => x !== o);
+}
+
+export function cancelAll(t: Round, why = "全部撤单", src: EventSrc = "manual") {
+  for (const o of t.orders) pushEv(t, "cancel", src, t.cursor - 1, o.id, o.price, o.side, { why });
+  t.orders = [];
 }
 
 export function validTpSl(t: Round, kind: "tp" | "sl", v: number) {
@@ -384,15 +571,33 @@ export function setPosTpSl(t: Round, tp: number | null, sl: number | null): ActR
   if (e1 || e2) return { ok: false, error: e1 || e2 };
   t.pos.tp = tp;
   t.pos.sl = sl;
+  pushEv(t, "tpsl", "manual", t.cursor - 1, null, priceNow(t), t.pos.side, { tp, sl, why: "修改止盈止损", posId: t.pos.pid ?? null });
   return { ok: true };
 }
 
 export function flatten(t: Round, lev: number, mode: Pos["mode"], why: string) {
-  if (!t.pos) return;
-  const p = priceNow(t);
-  const side = opp(t.pos.side);
-  applyFill(t, side, t.pos.qty, slipPx(t, side, p), FEE_TAKER, t.cursor - 1, "市价", lev, mode, why);
-  t.orders = [];
+  if (t.pos) {
+    const p = priceNow(t);
+    const side = opp(t.pos.side);
+    const idx = t.cursor - 1;
+    const fill = slipPx(t, side, p);
+    const oid = t.oid++;
+    pushEv(t, "trigger", "round_end", idx, oid, fill, side, { posId: t.pos.pid ?? null });
+    applyFill(t, side, t.pos.qty, fill, FEE_TAKER, idx, "市价", lev, mode, why, {
+      oid,
+      orderPrice: null,
+      reason: "round_end",
+      view: null,
+      snap: null,
+    });
+  }
+  cancelAll(t, "局终撤单", "round_end");
+}
+
+/** Round end: flat everything, cancel orders, snapshot drawings. */
+export function finishRound(t: Round, lev: number, mode: Pos["mode"]) {
+  flatten(t, lev, mode, "结束");
+  t.endDrawings = snapDrawings(t.drawings);
 }
 
 export function newRound(d: Drawn, wallet: number): Round {
@@ -420,6 +625,9 @@ export function newRound(d: Drawn, wallet: number): Round {
     bust: false,
     startedAt: Date.now(),
     drawings: [],
+    events: [],
+    posStats: [],
+    endDrawings: null,
   };
 }
 

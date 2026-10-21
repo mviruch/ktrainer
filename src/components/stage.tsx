@@ -202,6 +202,8 @@ export function Stage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [styleId, setStyleId] = useState<number | null>(null);
   const [inds, setInds] = useState<IndInst[]>(loadInds);
+  const shareInds = t.setInds;
+  useEffect(() => shareInds(inds), [shareInds, inds]);
   const [plots, setPlots] = useState<Plot[]>([]);
   const [boxes, setBoxes] = useState<PaneBox[]>([]);
   const [indError, setIndError] = useState("");

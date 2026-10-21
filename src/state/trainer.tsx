@@ -1,12 +1,13 @@
 /* eslint-disable react-refresh/only-export-components, react-hooks/immutability */
 import { useContext, useEffect, useMemo, useState, createContext, type ReactNode } from "react";
-import { FIXED, IV_MS, LEV_MAX, SPEED_MAX, SPEED_MIN } from "@/lib/constants";
+import { FILL_CAP, FIXED, IV_MS, LEV_MAX, SPEED_MAX, SPEED_MIN } from "@/lib/constants";
 import {
   advance,
   canSkip,
+  cancelAll as cancelAllOrders,
   cancelOrder,
   closePct,
-  flatten,
+  finishRound,
   maxOpen,
   newRound,
   placeOrder,
@@ -27,13 +28,21 @@ import {
   saveAccount,
   saveConfig as writeCfg,
   saveLog,
+  clearReviews,
+  loadReviews,
+  saveReview,
   saveRound,
   saveRuns,
   toLog,
 } from "@/lib/persist";
-import { store } from "@/lib/store";
+import { onStoreFail, store } from "@/lib/store";
+import { toReview } from "@/lib/review-store";
+import { attachSnaps, memorySnapStore, saveSnaps, SNAP_KEEP, snapSig, type SnapRec, type SnapStore } from "@/lib/snap-store";
+import { buildReviewExport, reviewCsv, reviewJson } from "@/lib/export-review";
+import { download } from "@/lib/stats";
+import { idbSnapStore } from "@/state/idb-snaps";
 import { activeView, bucketOpen, intervalList } from "@/lib/frames";
-import type { ActResult, Config, Drawing, Interval, MarginMode, OrderDraft, OrderTab, Phase, Round, RoundLog, RunLog } from "@/lib/types";
+import type { ActResult, CaptureIn, Config, Drawing, Interval, MarginMode, OrderDraft, OrderTab, Phase, Round, RoundLog, RunLog } from "@/lib/types";
 
 export type DialogState =
   | null
@@ -110,7 +119,26 @@ export type Trainer = Box & {
   fit: () => void;
   bindFit: (fn: (() => void) | null) => void;
   maxLong: () => number;
+  /** Shell → core: indicators currently on the chart, snapshotted at order time. */
+  setInds: (rows: CaptureIn["inds"]) => void;
+  /** After a refresh-restore: read this round's snapshots back from IndexedDB. */
+  restoreSnaps: (t: Round) => Promise<number>;
+  /** Toast for a failed write (throttled per kind); wired to store.ts by the provider. */
+  warnFail: (kind: string) => void;
+  /** 「复盘详细导出」: JSON + flat CSV for rounds that have a fut-review record. */
+  exportReview: () => Promise<boolean>;
 };
+
+/** What each failed write loses; shown once per kind per FAIL_GAP. */
+const FAIL_MSG: Record<string, string> = {
+  "fut-log": "浏览器存储已满：本局成绩没存上，刷新后会丢。建议先到统计里导出 CSV / JSON",
+  "fut-round": "浏览器存储已满：进行中的这一局没存上，刷新会丢掉进度",
+  "fut-review": "浏览器存储已满：复盘详情（成交明细、委托事件、持仓统计、画线）没存上，刷新后会丢。建议先导出",
+  "fut-acc": "浏览器存储已满：账户余额没存上，刷新后会回到上次保存的余额",
+  "fut-runs": "浏览器存储已满：轮次统计没存上，刷新后会丢。建议先导出",
+  snaps: "K 线快照没存进 IndexedDB，刷新后本局下单快照会丢。建议先导出",
+};
+const FAIL_GAP = 30_000;
 
 const Ctx = createContext<Trainer | null>(null);
 
@@ -148,6 +176,36 @@ function createApi(box: { current: Box }, bump: () => void) {
   let saveTimer = 0;
   let saveAt = 0;
   let fitChart: (() => void) | null = null;
+  let curInds: CaptureIn["inds"] = [];
+  const failAt: Record<string, number> = {};
+  function warnFail(kind: string) {
+    const now = Date.now();
+    if (failAt[kind] && now - failAt[kind] < FAIL_GAP) return;
+    failAt[kind] = now;
+    toastMsg(FAIL_MSG[kind] ?? `浏览器存储已满：设置（${kind}）没存上，刷新后会丢`, 5000);
+  }
+  let snapStore: SnapStore;
+  try {
+    snapStore = typeof indexedDB !== "undefined" ? idbSnapStore() : memorySnapStore();
+  } catch {
+    snapStore = memorySnapStore();
+  }
+  let snapWritten = "";
+  /** Serialises IndexedDB work so a write never races the refresh-restore read (which would drop old snaps). */
+  let snapChain: Promise<unknown> = Promise.resolve();
+  function persistSnaps(t: Round) {
+    snapChain = snapChain.then(async () => {
+      const sig = snapSig(t);
+      if (sig === snapWritten) return;
+      try {
+        await saveSnaps(snapStore, t);
+        snapWritten = sig;
+      } catch {
+        warnFail("snaps");
+      }
+    });
+  }
+  const cap = (t: Round): CaptureIn => ({ view: activeView(t), inds: curInds, drawings: t.drawings });
 
   function toastMsg(msg: string, ms = 2000) {
     const id = ++toastSeq;
@@ -167,6 +225,7 @@ function createApi(box: { current: Box }, bump: () => void) {
       const t = box.current.round;
       if (!t || t.done) return;
       saveRound(t);
+      persistSnaps(t);
     };
     if (now) {
       window.clearTimeout(saveTimer);
@@ -215,9 +274,9 @@ function createApi(box: { current: Box }, bump: () => void) {
     // Stop any debounced autosave so a stale write cannot resurrect this round after clearRound.
     cancelSave();
     box.current.playing = false;
-    flatten(t, box.current.acc.lev, box.current.acc.mode, "结束");
-    t.orders = [];
+    finishRound(t, box.current.acc.lev, box.current.acc.mode);
     t.done = true;
+    persistSnaps(t);
     // Drop in-progress draft immediately — refresh must not restore an open position from an ended round.
     clearRound();
 
@@ -229,6 +288,9 @@ function createApi(box: { current: Box }, bump: () => void) {
       rec = prior;
     } else {
       rec = toLog(t, reason);
+      const review = toReview(t);
+      saveReview(review);
+      if (review.fillsCut) toastMsg(`本局成交超过 ${FILL_CAP} 笔，复盘记录只保留前 ${FILL_CAP} 笔`, 4000);
       box.current.log = [...box.current.log, rec].slice(-600);
       saveLog(box.current.log);
       box.current.acc.wallet = t.wallet;
@@ -480,7 +542,7 @@ function createApi(box: { current: Box }, bump: () => void) {
     place(d: OrderDraft) {
       const t = box.current.round;
       if (!t || t.done) return false;
-      const res = placeOrder(t, d, box.current.acc.mode);
+      const res = placeOrder(t, d, box.current.acc.mode, cap(t));
       if (!res.ok) {
         toastMsg(res.error);
         return false;
@@ -493,7 +555,7 @@ function createApi(box: { current: Box }, bump: () => void) {
     closePart(f: number) {
       const t = box.current.round;
       if (!t || !t.pos) return;
-      closePct(t, f, box.current.acc.lev, box.current.acc.mode);
+      closePct(t, f, box.current.acc.lev, box.current.acc.mode, cap(t));
       saveSoon(true);
       bump();
     },
@@ -511,7 +573,7 @@ function createApi(box: { current: Box }, bump: () => void) {
         bump();
         return;
       }
-      const res = reversePos(t, box.current.acc.lev, box.current.acc.mode);
+      const res = reversePos(t, box.current.acc.lev, box.current.acc.mode, cap(t));
       if (!res.ok) {
         toastMsg(res.error);
         bump();
@@ -530,7 +592,7 @@ function createApi(box: { current: Box }, bump: () => void) {
     cancelAll() {
       const t = box.current.round;
       if (!t) return;
-      t.orders = [];
+      cancelAllOrders(t);
       saveSoon(true);
       bump();
     },
@@ -653,6 +715,9 @@ function createApi(box: { current: Box }, bump: () => void) {
       box.current.acc.runN = 0;
       saveLog([]);
       saveRuns([]);
+      clearReviews();
+      snapWritten = "";
+      snapChain = snapChain.then(() => snapStore.clear()).catch(() => toastMsg("K 线快照没能从 IndexedDB 清掉，可以稍后再清一次", 4000));
       saveAccount(box.current.acc);
       if (t && !t.done) {
         t.wallet = t.startWallet = t.peakEq = box.current.acc.wallet;
@@ -691,6 +756,51 @@ function createApi(box: { current: Box }, bump: () => void) {
       if (!t || t.done) return 0;
       return maxOpen(t, 1, box.current.acc.lev);
     },
+    setInds(rows: CaptureIn["inds"]) {
+      curInds = rows ?? [];
+    },
+    warnFail,
+    async exportReview() {
+      const log = box.current.log;
+      const reviews = loadReviews().filter((r) => log.some((l) => l.startedAt === r.startedAt));
+      if (!reviews.length) {
+        toastMsg("还没有可导出的局：复盘详情只记录这个版本之后打完的局", 3500);
+        return false;
+      }
+      const recs = new Map<number, SnapRec>();
+      let keys: number[] = [];
+      try {
+        await snapChain; // let pending snapshot writes land first
+        keys = await snapStore.keys();
+        for (const r of reviews) {
+          if (!keys.includes(r.startedAt)) continue;
+          const rec = await snapStore.get(r.startedAt);
+          if (rec) recs.set(r.startedAt, rec);
+        }
+      } catch {
+        toastMsg("读取 K 线快照失败，这次导出里的快照会是空的", 4000);
+      }
+      const x = buildReviewExport(log, reviews, { recs, keys, keep: SNAP_KEEP });
+      download("合约训练复盘.json", reviewJson(x), "application/json");
+      window.setTimeout(() => download("合约训练复盘.csv", reviewCsv(x), "text/csv;charset=utf-8"), 300);
+      toastMsg(`已导出 ${x.rounds.length} 局复盘（JSON + CSV）`, 2600);
+      return true;
+    },
+    restoreSnaps(t: Round) {
+      const job = snapChain.then(async () => {
+        try {
+          const n = attachSnaps(t, await snapStore.get(t.startedAt));
+          snapWritten = snapSig(t);
+          if (n) bump();
+          return n;
+        } catch {
+          toastMsg("读取 K 线快照失败，本局之前的下单快照这次看不到", 4000);
+          return 0;
+        }
+      });
+      snapChain = job;
+      return job;
+    },
   };
 }
 
@@ -701,6 +811,12 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
     const api = createApi(holder, () => setRev((n) => n + 1));
     return { holder, api, booted: false };
   });
+
+  useEffect(() => {
+    // Registered here (not in createApi): StrictMode builds createApi twice and keeps only one.
+    onStoreFail((k) => store.api.warnFail(k));
+    return () => onStoreFail(null);
+  }, [store]);
 
   useEffect(() => {
     if (!store.booted) {
@@ -715,6 +831,7 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
           store.holder.current.round = saved;
           store.holder.current.phase = "trade";
           store.api.toastMsg("接着上次没打完的那一局", 2600);
+          void store.api.restoreSnaps(saved);
         }
       } else if (store.holder.current.log.length) store.api.start();
     }
