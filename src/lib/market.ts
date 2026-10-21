@@ -1,4 +1,5 @@
 import { FALLBACK_TOP, FIXED, IV_MS, IV_OK, NOT_COIN } from "./constants";
+import { withDerivedFrames } from "./frames";
 import { store } from "./store";
 import type { Bar, Config, Drawn, Frame, Interval } from "./types";
 
@@ -200,6 +201,7 @@ function chosenIntervals(cfg: Config): Interval[] {
 /* 开局之前的长周期。跟基础周期重叠的那一根也留下，等它收盘后替换掉不完整的拼柱。 */
 async function loadFrames(sym: string, ivs: Interval[], firstBase: number) {
   const frames: Frame[] = [];
+  const failed: Interval[] = [];
   await Promise.all(
     ivs.map(async (iv) => {
       const ms = IV_MS[iv];
@@ -209,11 +211,11 @@ async function loadFrames(sym: string, ivs: Interval[], firstBase: number) {
         const keep = bars.filter((b) => b.t < firstBase);
         if (keep.length) frames.push({ interval: iv, bars: keep });
       } catch {
-        /* 这一档没有，本局就少一个周期 */
+        failed.push(iv); // 网络 / 接口失败：下面同样用 base 聚合兜底
       }
     }),
   );
-  return IV_OK.filter((iv) => frames.some((f) => f.interval === iv)).map((iv) => frames.find((f) => f.interval === iv)!);
+  return { frames: IV_OK.filter((iv) => frames.some((f) => f.interval === iv)).map((iv) => frames.find((f) => f.interval === iv)!), failed };
 }
 
 function pushRecent(tag: string) {
@@ -306,9 +308,17 @@ export async function drawSession(cfg: Config): Promise<{ ok: true; drawn: Drawn
       const ctx = Math.min(at < 0 ? bars.length : at, bars.length - 100);
       if (ctx >= FIXED.ctxMin) {
         pushRecent(tag);
-        const frames = await loadFrames(sym, ivs.slice(1), bars[0].t);
-        const missing = ivs.slice(1).filter((x) => !frames.some((f) => f.interval === x));
-        const extra = missing.length ? `${missing.join("、")} 没拉到，这局少这几档` : undefined;
+        const got = await loadFrames(sym, ivs.slice(1), bars[0].t);
+        const missing = ivs.slice(1).filter((x) => !got.frames.some((f) => f.interval === x));
+        // 缺的长周期（新币开局前没有历史 / 拉取失败）一律用 base 聚合补上，口径同快照 closedBars。
+        const frames = withDerivedFrames(got.frames, iv, missing);
+        const failed = missing.filter((x) => got.failed.includes(x));
+        const fresh = missing.filter((x) => !got.failed.includes(x));
+        const parts = [
+          fresh.length ? `${fresh.join("、")} 开局前没有历史（可能是新币），已用 ${iv} 聚合补上` : "",
+          failed.length ? `${failed.join("、")} 没拉到行情，已用 ${iv} 聚合补上` : "",
+        ].filter(Boolean);
+        const extra = parts.length ? parts.join("；") + "，最早只到本局第一根 " + iv : undefined;
         const notes = [note, extra].filter(Boolean).join("。");
         return { ok: true, drawn: { symbol: sym, interval: iv, bars, ctx, frames }, note: notes || undefined };
       }

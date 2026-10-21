@@ -105,8 +105,9 @@ function unpackFrames(raw: unknown, base: Interval): Frame[] {
     if (!item || typeof item !== "object") continue;
     const iv = (item as { interval?: string }).interval;
     const rows = (item as { bars?: SavedBar[] }).bars;
-    if (!iv || !isInterval(iv) || iv === base || !Array.isArray(rows) || !rows.length) continue;
-    out.push({ interval: iv, bars: unpackBars(rows) });
+    const derived = (item as { derived?: boolean }).derived === true;
+    if (!iv || !isInterval(iv) || iv === base || !Array.isArray(rows) || (!rows.length && !derived)) continue;
+    out.push({ interval: iv, bars: unpackBars(rows), ...(derived ? { derived: true } : {}) });
   }
   return out;
 }
@@ -122,7 +123,7 @@ export function saveRound(t: Round) {
     symbol: t.symbol,
     interval: t.interval,
     view: t.view,
-    frames: t.frames.map((f) => ({ interval: f.interval, bars: packBars(f.bars) })),
+    frames: t.frames.map((f) => ({ interval: f.interval, bars: packBars(f.bars), ...(f.derived ? { derived: true } : {}) })),
     ctx: t.ctx,
     cursor: t.cursor,
     bars: packBars(t.bars),

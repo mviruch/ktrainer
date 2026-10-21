@@ -3,6 +3,7 @@ import { advance, cancelOrder, finishRound, newRound, placeOrder, setPosTpSl, cl
 import { buildReviewExport, CSV_COLS, reviewCsv, reviewJson } from "../src/lib/export-review.ts";
 import { toReview, type ReviewRec } from "../src/lib/review-store.ts";
 import { collectSnaps, type SnapRec } from "../src/lib/snap-store.ts";
+import { withDerivedFrames } from "../src/lib/frames.ts";
 import type { Bar, Drawn, Frame, OrderDraft, Round, RoundLog } from "../src/lib/types.ts";
 
 function assert(cond: unknown, msg: string): asserts cond {
@@ -28,7 +29,8 @@ function mkRound(seed: number, startedAt: number): Round {
     }
     return out;
   };
-  const frames: Frame[] = [{ interval: "4h", bars: agg(144e5) }]; // 15m / 1h not loaded → aggregated in snapshot
+  // 4h fetched; 15m / 1h missing → derived (base-aggregated), exactly as market.drawSession builds it
+  const frames: Frame[] = withDerivedFrames([{ interval: "4h", bars: agg(144e5) }], "5m", ["15m", "1h"]);
   const d: Drawn = { symbol: "SOLUSDT", interval: "5m", bars, frames, ctx: 900 };
   const t = newRound(d, 10000);
   t.startedAt = startedAt;
@@ -77,6 +79,8 @@ mk(2, 1002, false, true); // B reveal failed
 mk(3, 1003, false, true, true); // C missing base
 mk(4, 900, false, false); // D snapshots pruned (oldest)
 mk(5, 1005, false, false); // E snapshots not found (recent)
+// round E stands in for a record written before aggregated existed
+delete rounds[4].rv.aggregated;
 const recs = new Map(rounds.filter((r) => r.snap).map((r) => [r.rv.startedAt, r.snap!]));
 // D is older than the 50 kept rounds; E is newer than the oldest kept one.
 const keys = [...recs.keys(), ...Array.from({ length: 47 }, (_, k) => 1010 + k)]; // 50 kept, oldest 1001
@@ -90,6 +94,9 @@ const [A, B, C, D, E] = x.rounds;
 // structure
 assert(A.reveal_status === "revealed" && A.symbol === "SOLUSDT" && A.real_t0 && A.fills[0].real, "revealed: symbol/real");
 assert(B.reveal_status === "blind" && !("symbol" in B) && !("real_t0" in B) && B.fills.every((f) => !("real" in f)), "blind: no real");
+assert(JSON.stringify(A.aggregated_timeframes) === '["15m","1h"]' && JSON.stringify(B.aggregated_timeframes) === '["15m","1h"]', "aggregated_timeframes from Frame.derived");
+assert(E.aggregated_timeframes === null, "old record → aggregated_timeframes null");
+assert(!csv.includes("aggregated"), "CSV unchanged (no aggregated column)");
 assert(A.d0 === "D0 00:00" && /^D\d+ \d\d:\d\d$/.test(A.t1!), "D clock");
 const kinds = A.events.map((e) => e.kind + ":" + e.src).join(",");
 assert(kinds.startsWith("place:limit,cancel:manual,trigger:market,tpsl:order,trigger:market,tpsl:manual,trigger:market"), "event stream " + kinds);

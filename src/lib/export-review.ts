@@ -99,6 +99,8 @@ export type ExpRound = {
   t1: string | null;
   base_interval: string;
   intervals: string[];
+  /** Intervals base-aggregated because nothing was fetched (new listing / fetch failed); null = record predates the field. */
+  aggregated_timeframes: string[] | null;
   total_bars: number;
   end_reason: string;
   pnl: number;
@@ -285,6 +287,7 @@ export function exportRound(log: RoundLog, rv: ReviewRec, snaps: SnapInput): Exp
     t1: c.dms(log.t1),
     base_interval: ivs[0] ?? "",
     intervals: ivs,
+    aggregated_timeframes: Array.isArray(rv.aggregated) ? [...rv.aggregated] : null,
     total_bars: log.bars,
     end_reason: log.reason,
     pnl: log.pnl,

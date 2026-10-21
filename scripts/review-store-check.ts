@@ -66,6 +66,12 @@ assert(keysToDrop([1, 2], 50).length === 0, "keysToDrop under cap");
   const rv = toReview(t);
   assert(rv.fills.every((f) => !("snap" in f)), "review has no snapshots");
   assert(rv.fillsCut === 0 && rv.events.length === t.events.length && rv.posStats.length === 1 && Array.isArray(rv.endDrawings), "review content");
+  assert(Array.isArray(rv.aggregated) && rv.aggregated.length === 0, "no derived frames → aggregated []");
+  {
+    const t2 = mkRound(2);
+    t2.frames = [{ interval: "15m", bars: [], derived: true }, { interval: "4h", bars: [t2.bars[0]] }, { interval: "1h", bars: [], derived: true }];
+    assert(JSON.stringify(toReview(t2).aggregated) === '["15m","1h"]', "aggregated captured from Frame.derived");
+  }
   assert(rv.fills[0].oid === t.fills[0].oid && rv.fills[0].view === "5m" && rv.fills[0].sl === 98, "review keeps capture fields");
   t.fills = Array.from({ length: 520 }, () => ({ ...t.fills[0] }));
   assert(toReview(t).fills.length === 500 && toReview(t).fillsCut === 20, "500 cap + fillsCut");

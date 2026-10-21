@@ -147,7 +147,9 @@ export type Snapshot = {
 /** What the shell hands the core at order time. */
 export type CaptureIn = { view?: Interval; inds?: { id: number; kind: string; params: Record<string, number> }[]; drawings?: Drawing[] };
 
-export type Frame = { interval: Interval; bars: Bar[] };
+/** Longer-interval history before bars[0]. derived = nothing usable was fetched (new listing / fetch failed):
+ *  the whole interval is aggregated from base bars, dropping a first bucket that opens before bars[0]. */
+export type Frame = { interval: Interval; bars: Bar[]; derived?: boolean };
 
 export type Round = {
   symbol: string;
