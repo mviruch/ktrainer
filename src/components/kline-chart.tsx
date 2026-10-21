@@ -238,12 +238,10 @@ function priceOffScreen(bars: BarApi, chart: IChartApi, price: number): "up" | "
 }
 
 
-function readAnchor(chart: IChartApi, bars: BarApi, param: MouseEventParams<Time>, base: number | null): Anchor | null {
+/** Mouse → anchor with a continuous time (no bar snapping) and the real (un-blinded) price. */
+function readAnchor(draw: DrawPrimitive, param: MouseEventParams<Time>): Anchor | null {
   if (!param.point || param.paneIndex) return null;
-  const shown = bars.coordinateToPrice(param.point.y);
-  const time = chart.timeScale().coordinateToTime(param.point.x);
-  if (shown == null || typeof time !== "number") return null;
-  return { time, price: base ? (Number(shown) * base) / 100 : Number(shown) };
+  return draw.anchorAt(param.point.x, param.point.y);
 }
 
 export function KlineChart({
@@ -472,7 +470,7 @@ export function KlineChart({
         selectRef.current?.(hit ? hit.id : null);
         return;
       }
-      const anchor = readAnchor(chart, bars, param, baseRef.current);
+      const anchor = readAnchor(draw, param);
       if (anchor) pickRef.current(anchor);
     };
     const onDblClick = (param: MouseEventParams<Time>) => {
@@ -484,7 +482,7 @@ export function KlineChart({
       }
     };
     const onMove = (param: MouseEventParams<Time>) => {
-      hoverRef.current(readAnchor(chart, bars, param, baseRef.current));
+      hoverRef.current(readAnchor(draw, param));
       // seriesData / param.time are nearest-bar (vert line snaps to index even in Normal).
       if (!param.point || typeof param.time !== "number") hoverBarRef.current?.(null);
       else hoverBarRef.current?.(param.time);
@@ -569,6 +567,10 @@ export function KlineChart({
       if (dragRef.current) {
         dragRef.current = null;
         chart.applyOptions({ handleScroll: true, handleScale: true });
+        // A drag usually produces no chart click, so the suppress flag would otherwise eat the next real click.
+        setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
       }
     };
     // Wheel over right price axis → vertical zoom only (library wheel always zooms time).
@@ -646,6 +648,7 @@ export function KlineChart({
     };
     if (!data || data.candles.length === 0) {
       a.bars.setData([]);
+      a.draw.setBars([], 60);
       a.markers.setMarkers([]);
       a.now.sync(null);
       for (const line of a.lines) a.bars.removePriceLine(line);
@@ -674,6 +677,11 @@ export function KlineChart({
       priceLineStyle: LineStyle.Dashed,
       priceFormat: { type: "custom", minMove: 0.00000001, formatter: (p: BarPrice) => fmtNum(Number(p), data.blind) },
     });
+    if (prev.current.view !== viewKey) {
+      // Interval switch: VOL / indicator series still hold the old interval's time points; left in place they
+      // stay on the scale as a union and, once replaced, shift the logical range off the follow() target.
+      for (const item of a.indSeries) item.series.setData([]);
+    }
     const t0 = data.t0;
     // Weights for new time points are computed on setData below; keep them on relative-day boundaries.
     if (behaviorRef.current) behaviorRef.current.t0 = t0;
@@ -717,6 +725,16 @@ export function KlineChart({
         };
       }),
     );
+    {
+      // Drawings map real timestamps onto this interval's bars (interpolate inside, extrapolate outside).
+      const times = data.candles.map((c) => c.time);
+      let step = Infinity;
+      for (let i = 1; i < times.length; i++) {
+        const d = times[i] - times[i - 1];
+        if (d > 0 && d < step) step = d;
+      }
+      a.draw.setBars(times, Number.isFinite(step) ? step : 60);
+    }
     a.markers.setMarkers(
       data.marks.map((m) => ({
         time: m.time as UTCTimestamp,
@@ -841,7 +859,9 @@ export function KlineChart({
     }
     // 新柱由图表自己平移，柱宽不动。这里重设范围会按宽度重算柱宽，看起来像整图在缩放。
     // Peek sets its own window around NOW; skip follow so we don't jump to the far right.
-    if (pin.current && (sessionChanged || viewChanged || prev.current.session < 0)) follow(count);
+    if (pin.current && (sessionChanged || viewChanged || prev.current.session < 0)) {
+      follow(count);
+    }
     prev.current = { session: sessionKey, peek: peekKey, cursor, view: viewKey, blind: data.blind };
   }, [model, sessionKey, peekKey, cursor, viewKey, up, down]);
 

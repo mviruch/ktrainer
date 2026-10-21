@@ -7,7 +7,8 @@ import type {
   UTCTimestamp,
 } from "lightweight-charts";
 import { fmtNum } from "@/lib/format";
-import { DEFAULT_CHANNEL_STYLE, type Drawing, type DrawStyle } from "@/lib/types";
+import { channelCornersTP, indexToX, logicalToTime, timeToLogical, xToIndex } from "@/lib/draw-math";
+import { DEFAULT_CHANNEL_STYLE, type Anchor, type Drawing, type DrawStyle } from "@/lib/types";
 
 const FIBS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 const INK = "#5C7194";
@@ -24,6 +25,8 @@ type Host = {
   draft: Drawing | null;
   base: number | null;
   selectedId: number | null;
+  xOf: (time: number) => number | null;
+  yOf: (price: number) => number | null;
 };
 
 type Pt = { x: number; y: number };
@@ -47,11 +50,8 @@ class DrawRenderer implements IPrimitivePaneRenderer {
       const ctx = scope.context;
       const width = scope.mediaSize.width;
       const height = scope.mediaSize.height;
-      const xOf = (time: number) => chart.timeScale().timeToCoordinate(time as UTCTimestamp);
-      const yOf = (price: number) => {
-        const shown = this.host.base ? (price / this.host.base) * 100 : price;
-        return series.priceToCoordinate(shown);
-      };
+      const xOf = (time: number) => this.host.xOf(time);
+      const yOf = (price: number) => this.host.yOf(price);
       const label = (price: number) => {
         const shown = this.host.base ? (price / this.host.base) * 100 : price;
         return fmtNum(shown, this.host.base != null);
@@ -108,33 +108,22 @@ function channelStyle(shape: Extract<Drawing, { kind: "channel" }>): DrawStyle {
   return { ...DEFAULT_CHANNEL_STYLE, ...shape.style };
 }
 
+/** Channel corners in pixels; geometry is built in time/price space so it is identical on every interval. */
 function channelCorners(
-  a: Pt,
-  b: Pt,
-  c: Pt,
-): { a: Pt; b: Pt; a2: Pt; b2: Pt; offset: Pt } {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  let ox: number;
-  let oy: number;
-  if (len2 < 1e-6) {
-    ox = c.x - a.x;
-    oy = c.y - a.y;
-  } else {
-    const t = ((c.x - a.x) * dx + (c.y - a.y) * dy) / len2;
-    const px = a.x + t * dx;
-    const py = a.y + t * dy;
-    ox = c.x - px;
-    oy = c.y - py;
+  shape: { a: Anchor; b: Anchor; c: Anchor },
+  xOf: (t: number) => number | null,
+  yOf: (p: number) => number | null,
+): { a: Pt; b: Pt; a2: Pt; b2: Pt; offset: Pt } | null {
+  const tp = channelCornersTP(shape.a, shape.b, shape.c);
+  const pts: Pt[] = [];
+  for (const k of [tp.a, tp.b, tp.a2, tp.b2]) {
+    const x = xOf(k.time);
+    const y = yOf(k.price);
+    if (x == null || y == null) return null;
+    pts.push({ x, y });
   }
-  return {
-    a,
-    b,
-    a2: { x: a.x + ox, y: a.y + oy },
-    b2: { x: b.x + ox, y: b.y + oy },
-    offset: { x: ox, y: oy },
-  };
+  const [a, b, a2, b2] = pts;
+  return { a, b, a2, b2, offset: { x: a2.x - a.x, y: a2.y - a.y } };
 }
 
 function drawChannel(
@@ -146,16 +135,10 @@ function drawChannel(
   yOf: (p: number) => number | null,
   _width: number,
 ) {
-  const xa = xOf(shape.a.time);
-  const ya = yOf(shape.a.price);
-  const xb = xOf(shape.b.time);
-  const yb = yOf(shape.b.price);
-  const xc = xOf(shape.c.time);
-  const yc = yOf(shape.c.price);
-  if (xa == null || ya == null || xb == null || yb == null || xc == null || yc == null) return;
+  const corners = channelCorners(shape, xOf, yOf);
+  if (!corners) return;
   const style = channelStyle(shape);
   const color = style.color;
-  const corners = channelCorners({ x: xa, y: ya }, { x: xb, y: yb }, { x: xc, y: yc });
   const offsetLen = Math.hypot(corners.offset.x, corners.offset.y);
   const baselineOnly = live && (!style.fill || offsetLen < 1.5);
   if (baselineOnly) {
@@ -192,7 +175,9 @@ function drawChannel(
   } else if (live) {
     dot(ctx, corners.a.x, corners.a.y, color);
     dot(ctx, corners.b.x, corners.b.y, color);
-    dot(ctx, xc, yc, color);
+    const xc = xOf(shape.c.time);
+    const yc = yOf(shape.c.price);
+    if (xc != null && yc != null) dot(ctx, xc, yc, color);
   }
 }
 
@@ -292,6 +277,9 @@ export class DrawPrimitive implements ISeriesPrimitive<Time> {
   draft: Drawing | null = null;
   base: number | null = null;
   selectedId: number | null = null;
+  /** Bar open times (seconds) on the time scale, index = logical index; step = interval seconds. */
+  times: number[] = [];
+  step = 60;
   private request: (() => void) | null = null;
   private views: readonly IPrimitivePaneView[];
 
@@ -324,16 +312,53 @@ export class DrawPrimitive implements ISeriesPrimitive<Time> {
     this.request?.();
   }
 
+  /** Bars currently on the time scale (call after setData / interval switch). */
+  setBars(times: number[], stepSec: number) {
+    this.times = times;
+    this.step = stepSec > 0 ? stepSec : 60;
+    this.request?.();
+  }
+
+  /** Pixel x of candle i and pixels per bar on the current time scale. */
+  private axis(): { coordOf: (i: number) => number | null; spacing: number } | null {
+    const ts = this.chart?.timeScale();
+    if (!ts || !this.times.length) return null;
+    const times = this.times;
+    const spacing = ts.options().barSpacing;
+    return { coordOf: (i: number) => ts.timeToCoordinate(times[i] as UTCTimestamp), spacing };
+  }
+
+  /** Continuous time → x: interpolate between neighbouring candles, extrapolate by interval length outside. */
+  xOf(time: number): number | null {
+    const ax = this.axis();
+    const idx = timeToLogical(this.times, this.step, time);
+    if (!ax || idx == null) return null;
+    return indexToX(this.times.length, ax.coordOf, ax.spacing, idx);
+  }
+
+  yOf(price: number): number | null {
+    const series = this.series;
+    if (!series) return null;
+    const shown = this.base ? (price / this.base) * 100 : price;
+    return series.priceToCoordinate(shown);
+  }
+
+  /** x → continuous time (inverse of xOf, no bar snapping). Seconds, rounded to 1s. */
+  timeAt(x: number): number | null {
+    const ax = this.axis();
+    if (!ax) return null;
+    const idx = xToIndex(this.times.length, ax.coordOf, ax.spacing, x);
+    const t = idx == null ? null : logicalToTime(this.times, this.step, idx);
+    return t == null ? null : Math.round(t);
+  }
+
   /** Pick in media (CSS pixel) coords relative to the pane. */
   pickAt(x: number, y: number): DrawHit | null {
     const chart = this.chart;
     const series = this.series;
     if (!chart || !series) return null;
-    const xOf = (time: number) => chart.timeScale().timeToCoordinate(time as UTCTimestamp);
-    const yOf = (price: number) => {
-      const shown = this.base ? (price / this.base) * 100 : price;
-      return series.priceToCoordinate(shown);
-    };
+    const xOf = (time: number) => this.xOf(time);
+    const yOf = (price: number) => this.yOf(price);
     // Prefer handles of selected channel.
     if (this.selectedId != null) {
       const sel = this.drawings.find((d) => d.id === this.selectedId);
@@ -350,14 +375,8 @@ export class DrawPrimitive implements ISeriesPrimitive<Time> {
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const shape = this.drawings[i];
       if (shape.kind === "channel") {
-        const xa = xOf(shape.a.time);
-        const ya = yOf(shape.a.price);
-        const xb = xOf(shape.b.time);
-        const yb = yOf(shape.b.price);
-        const xc = xOf(shape.c.time);
-        const yc = yOf(shape.c.price);
-        if (xa == null || ya == null || xb == null || yb == null || xc == null || yc == null) continue;
-        const c = channelCorners({ x: xa, y: ya }, { x: xb, y: yb }, { x: xc, y: yc });
+        const c = channelCorners(shape, xOf, yOf);
+        if (!c) continue;
         if (
           pointInPoly(x, y, [c.a, c.b, c.b2, c.a2]) ||
           distToSeg(x, y, c.a.x, c.a.y, c.b.x, c.b.y) <= HIT_LINE ||
@@ -387,14 +406,8 @@ export class DrawPrimitive implements ISeriesPrimitive<Time> {
     xOf: (t: number) => number | null,
     yOf: (p: number) => number | null,
   ): { a: Pt; b: Pt; c: Pt } | null {
-    const xa = xOf(shape.a.time);
-    const ya = yOf(shape.a.price);
-    const xb = xOf(shape.b.time);
-    const yb = yOf(shape.b.price);
-    const xc = xOf(shape.c.time);
-    const yc = yOf(shape.c.price);
-    if (xa == null || ya == null || xb == null || yb == null || xc == null || yc == null) return null;
-    const corners = channelCorners({ x: xa, y: ya }, { x: xb, y: yb }, { x: xc, y: yc });
+    const corners = channelCorners(shape, xOf, yOf);
+    if (!corners) return null;
     // C handle sits on the parallel corner near A (a2), matching design.
     return { a: corners.a, b: corners.b, c: corners.a2 };
   }
@@ -405,8 +418,8 @@ export class DrawPrimitive implements ISeriesPrimitive<Time> {
     const series = this.series;
     if (!chart || !series) return null;
     const shown = series.coordinateToPrice(y);
-    const time = chart.timeScale().coordinateToTime(x);
-    if (shown == null || typeof time !== "number") return null;
+    const time = this.timeAt(x);
+    if (shown == null || time == null) return null;
     const price = this.base ? (Number(shown) * this.base) / 100 : Number(shown);
     return { time, price };
   }
