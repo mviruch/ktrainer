@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FEE_TAKER, FIXED, IV_CN, IV_OK, LEV_CHIPS, LEV_MAX, POOLS, SPEED_MAX, SPEED_MIN } from "@/lib/constants";
 import { availBal, opp, priceNow, slipPx, uPnl } from "@/lib/engine";
@@ -196,6 +197,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
   const [pool, setPool] = useState(t.cfg.pool);
   const [ivs, setIvs] = useState(t.cfg.intervals.split(","));
   const [green, setGreen] = useState(t.cfg.greenUp);
+  const [fillSound, setFillSound] = useState(t.cfg.fillSound !== false);
   return (
     <DialogContent>
       <DialogHeader>
@@ -243,6 +245,12 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
+      <h3 className="sheet-h">音效</h3>
+      <Label className="flex items-center justify-between gap-3 text-[13px]">
+        <span>成交音效</span>
+        <Switch checked={fillSound} onCheckedChange={setFillSound} aria-label="成交音效" />
+      </Label>
+      <p className="hint">下单、平仓、止盈止损、强平等成交时播放短音效。手机浏览器需先点一下页面才能出声。</p>
       <h3 className="sheet-h">固定规则</h3>
       <div className="cfg-fixed">
         <div><span>初始本金</span><b>10,000 U，一直滚动；爆仓或手动重置才回到 1 万</b></div>
@@ -272,7 +280,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               t.toastMsg("至少留一个周期", 2500);
               return;
             }
-            t.saveConfig({ pool, intervals: ivs.join(","), greenUp: green });
+            t.saveConfig({ pool, intervals: ivs.join(","), greenUp: green, fillSound });
             onClose();
           }}
         >

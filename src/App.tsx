@@ -5,10 +5,21 @@ import { Readout } from "@/components/readout";
 import { Side } from "@/components/result-panel";
 import { ActionSheets, RouteSheets } from "@/components/sheets";
 import { Stage } from "@/components/stage";
+import { unlockFillSound } from "@/lib/fill-sound";
 import { TrainerProvider, useTrainer } from "@/state/trainer";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function App() {
+  useEffect(() => {
+    const unlock = () => unlockFillSound();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
   return (
     <BrowserRouter>
       <TrainerProvider>

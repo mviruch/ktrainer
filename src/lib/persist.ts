@@ -15,18 +15,24 @@ function isInterval(v: string): v is Interval {
 
 export function loadConfig(): Config {
   const saved = store.get<Partial<Config>>("fut-cfg", {});
-  const cfg: Config = { pool: "top30", intervals: "5m,15m,1h,4h,1d", greenUp: true };
+  const cfg: Config = { pool: "top30", intervals: "5m,15m,1h,4h,1d", greenUp: true, fillSound: true };
   if (saved.pool && isPool(saved.pool)) cfg.pool = saved.pool;
   const ivs = String(saved.intervals || "")
     .split(",")
     .filter(isInterval);
   if (ivs.length) cfg.intervals = ivs.join(",");
   if (typeof saved.greenUp === "boolean") cfg.greenUp = saved.greenUp;
+  if (typeof saved.fillSound === "boolean") cfg.fillSound = saved.fillSound;
   return cfg;
 }
 
 export function saveConfig(cfg: Config) {
-  store.set("fut-cfg", { pool: cfg.pool, intervals: cfg.intervals, greenUp: cfg.greenUp });
+  store.set("fut-cfg", {
+    pool: cfg.pool,
+    intervals: cfg.intervals,
+    greenUp: cfg.greenUp,
+    fillSound: cfg.fillSound !== false,
+  });
 }
 
 export function loadAccount(): Account {
