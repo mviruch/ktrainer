@@ -19,6 +19,8 @@ export function TradePanel() {
   const round = t.round;
   const [amt, setAmt] = useState("");
   const [pct, setPct] = useState(0);
+  const [amtFocus, setAmtFocus] = useState(false);
+  const [orderSide, setOrderSide] = useState<Side>(1);
   const [limit, setLimit] = useState("");
   const [tpslOn, setTpslOn] = useState(false);
   const [tp, setTp] = useState("");
@@ -35,10 +37,13 @@ export function TradePanel() {
   function applyPct(v: number) {
     setPct(v);
     const f = v / 100;
-    setAmt(f > 0 ? String(Math.floor(maxOpen(round!, 1, t.acc.lev) * f * 0.999)) : "");
+    setAmt(f > 0 ? String(Math.floor(maxOpen(round!, orderSide, t.acc.lev) * f * 0.999)) : "");
   }
 
+  const showPct = pct > 0 && !amtFocus;
+
   function send(side: Side) {
+    setOrderSide(side);
     const ok = t.place({
       side,
       tab: t.tab,
@@ -110,16 +115,18 @@ export function TradePanel() {
         <div className="tr-field">
           <span>数量</span>
           <input
-            value={amt}
+            value={showPct ? String(pct) : amt}
             inputMode="decimal"
             placeholder="仓位价值"
             autoComplete="off"
+            onFocus={() => setAmtFocus(true)}
+            onBlur={() => setAmtFocus(false)}
             onChange={(e) => {
               setAmt(filterDecimal(e.target.value));
               setPct(0);
             }}
           />
-          <em>USDT</em>
+          <em>{showPct ? "%" : "USDT"}</em>
         </div>
         <div className="flex flex-col gap-1">
           <div className="relative flex h-4 items-center">
@@ -158,11 +165,21 @@ export function TradePanel() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-2">
-          <Button variant="buy" className="btn-buy h-11 flex-col gap-0 leading-tight" onClick={() => send(1)}>
+          <Button
+            variant="buy"
+            className="btn-buy h-11 flex-col gap-0 leading-tight"
+            onPointerDown={() => setOrderSide(1)}
+            onClick={() => send(1)}
+          >
             <span className="text-[13px]">买入 / 做多</span>
             <span className="num text-[10px] font-normal opacity-80">可开多 {uFmt(maxOpen(round, 1, t.acc.lev), 0)} U</span>
           </Button>
-          <Button variant="sell" className="btn-sell h-11 flex-col gap-0 leading-tight" onClick={() => send(-1)}>
+          <Button
+            variant="sell"
+            className="btn-sell h-11 flex-col gap-0 leading-tight"
+            onPointerDown={() => setOrderSide(-1)}
+            onClick={() => send(-1)}
+          >
             <span className="text-[13px]">卖出 / 做空</span>
             <span className="num text-[10px] font-normal opacity-80">可开空 {uFmt(maxOpen(round, -1, t.acc.lev), 0)} U</span>
           </Button>
