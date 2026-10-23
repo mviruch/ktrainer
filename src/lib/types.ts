@@ -224,6 +224,8 @@ export type Config = {
   pool: Pool;
   intervals: string;
   greenUp: boolean;
+  /** 成交音效；缺省为开 */
+  fillSound?: boolean;
 };
 
 export type Account = {

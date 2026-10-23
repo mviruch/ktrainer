@@ -40,6 +40,7 @@ import { toReview } from "@/lib/review-store";
 import { attachSnaps, memorySnapStore, saveSnaps, SNAP_KEEP, snapSig, type SnapRec, type SnapStore } from "@/lib/snap-store";
 import { buildReviewExport, reviewFiles } from "@/lib/export-review";
 import { zipFiles } from "@/lib/zip";
+import { playFillSound } from "@/lib/fill-sound";
 import { download } from "@/lib/stats";
 import { idbSnapStore } from "@/state/idb-snaps";
 import { activeView, bucketOpen, intervalList } from "@/lib/frames";
@@ -208,6 +209,19 @@ function createApi(box: { current: Box }, bump: () => void) {
   }
   const cap = (t: Round): CaptureIn => ({ view: activeView(t), inds: curInds, drawings: t.drawings });
 
+  let suppressFillSound = false;
+
+  function fillCount() {
+    return box.current.round?.fills.length ?? 0;
+  }
+
+  function onNewFills(before: number) {
+    if (suppressFillSound || box.current.cfg.fillSound === false) return;
+    const t = box.current.round;
+    if (!t || t.fills.length <= before) return;
+    playFillSound();
+  }
+
   function toastMsg(msg: string, ms = 2000) {
     const id = ++toastSeq;
     box.current.toast = msg;
@@ -275,7 +289,9 @@ function createApi(box: { current: Box }, bump: () => void) {
     // Stop any debounced autosave so a stale write cannot resurrect this round after clearRound.
     cancelSave();
     box.current.playing = false;
+    suppressFillSound = true;
     finishRound(t, box.current.acc.lev, box.current.acc.mode);
+    suppressFillSound = false;
     t.done = true;
     persistSnaps(t);
     // Drop in-progress draft immediately — refresh must not restore an open position from an ended round.
@@ -347,7 +363,9 @@ function createApi(box: { current: Box }, bump: () => void) {
       void pullMore(t);
       return;
     }
+    const fillsBefore = fillCount();
     const { toasts } = advance(t, box.current.acc.lev, box.current.acc.mode);
+    onNewFills(fillsBefore);
     saveSoon(false);
     if (t.bust) {
       if (toasts.length) toastMsg(toasts[toasts.length - 1], 4000);
@@ -372,9 +390,13 @@ function createApi(box: { current: Box }, bump: () => void) {
     }
     const toasts: string[] = [];
     let moved = 0;
+    const fillsBefore = fillCount();
     while (true) {
       if (t.cursor >= t.bars.length) {
-        if (moved) saveSoon(false);
+        if (moved) {
+          onNewFills(fillsBefore);
+          saveSoon(false);
+        }
         if (toasts.length) toastMsg(toasts[toasts.length - 1], 3500);
         void pullMore(t);
         return;
@@ -391,6 +413,7 @@ function createApi(box: { current: Box }, bump: () => void) {
       const now = t.bars[t.cursor - 1].t + baseMs;
       if (bucketOpen(now, viewMs) === now || moved > 5000) break;
     }
+    onNewFills(fillsBefore);
     saveSoon(false);
     if (toasts.length) toastMsg(toasts[toasts.length - 1], 3500);
     else bump();
@@ -543,11 +566,13 @@ function createApi(box: { current: Box }, bump: () => void) {
     place(d: OrderDraft) {
       const t = box.current.round;
       if (!t || t.done) return false;
+      const fillsBefore = fillCount();
       const res = placeOrder(t, d, box.current.acc.mode, cap(t));
       if (!res.ok) {
         toastMsg(res.error);
         return false;
       }
+      onNewFills(fillsBefore);
       saveSoon(true);
       if (res.info) toastMsg(res.info, 3200);
       else bump();
@@ -556,7 +581,9 @@ function createApi(box: { current: Box }, bump: () => void) {
     closePart(f: number) {
       const t = box.current.round;
       if (!t || !t.pos) return;
+      const fillsBefore = fillCount();
       closePct(t, f, box.current.acc.lev, box.current.acc.mode, cap(t));
+      onNewFills(fillsBefore);
       saveSoon(true);
       bump();
     },
@@ -574,12 +601,14 @@ function createApi(box: { current: Box }, bump: () => void) {
         bump();
         return;
       }
+      const fillsBefore = fillCount();
       const res = reversePos(t, box.current.acc.lev, box.current.acc.mode, cap(t));
       if (!res.ok) {
         toastMsg(res.error);
         bump();
         return;
       }
+      onNewFills(fillsBefore);
       saveSoon(true);
       bump();
     },
