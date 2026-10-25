@@ -310,7 +310,7 @@ export function KlineChart({
         if (y0 != null && y >= 8 && y <= plotH - 8) {
           // Position tag wins: if the entry tag (avg) or last-price tag overlaps, nudge liq by half a tag height (9px).
           const TAG = 18;
-          const others = [m.lines.find((l) => l.id === "be")?.price, lastLive(m)]
+          const others = [m.lines.find((l) => l.id === "avg")?.price, m.lines.find((l) => l.id === "be")?.price, lastLive(m)]
             .filter((v): v is number => v != null)
             .map((v) => a.bars.priceToCoordinate(v))
             .filter((v): v is NonNullable<typeof v> => v != null);
@@ -991,7 +991,7 @@ export function KlineChart({
         <span
           key={tag.id}
           className="line-tag num pointer-events-none absolute left-1.5 z-[3] -translate-y-1/2 rounded-[3px] px-1.5 text-[10px] leading-4 font-medium whitespace-nowrap"
-          style={{ top: tag.y, color: tag.color, background: `color-mix(in srgb, ${tag.color} 20%, #131722)`, border: `1px solid color-mix(in srgb, ${tag.color} 45%, transparent)` }}
+          style={{ top: tag.y, color: tag.color, background: `${tag.color}33`, border: `1px solid ${tag.color}33` }}
         >
           {tag.text}
         </span>

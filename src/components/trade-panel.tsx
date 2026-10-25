@@ -268,7 +268,7 @@ function Position({ onEdit, onClose, onReverse }: { onEdit: () => void; onClose:
   return (
     <div>
       <div className="tr-poshd">
-        <Badge variant={P.side > 0 ? "up" : "down"} className={`tr-badge ${P.side > 0 ? "l" : "s"}`}>
+        <Badge variant={P.side > 0 ? "up" : "down"}>
           {P.side > 0 ? "多" : "空"} {P.lev}x
         </Badge>
         <span className="text-[11px] text-fg-3">{P.mode === "cross" ? "全仓" : "逐仓"}</span>
