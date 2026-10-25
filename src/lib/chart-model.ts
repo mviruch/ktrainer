@@ -97,18 +97,32 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
   }
   const px = (p: number) => displayPrice(p, base);
   const lines: LinePoint[] = [];
-  if (!round.done && round.pos && beLine) {
+  if (!round.done && round.pos) {
     const P = round.pos;
-    // BE replaces the avg/entry line (not drawn alongside). Net-zero after open + est. close fees.
-    const be = breakEvenPrice(round) ?? P.entry;
+    const now = priceNow(round);
+    const posColor = P.side > 0 ? up : down;
+    // Draw BE under the position line when they overlap so L/S stays readable.
+    if (beLine) {
+      const be = breakEvenPrice(round) ?? P.entry;
+      lines.push({
+        id: "be",
+        price: px(be),
+        color: "#787B86",
+        title: "",
+        style: "solid",
+        axisLabel: true,
+      });
+    }
+    // Position = entry avg (no fees). Left tag: L/S · PnL · notional USDT.
+    const notional = Math.abs(P.qty * P.entry);
     lines.push({
-      id: "be",
-      price: px(be),
-      color: P.side > 0 ? up : down,
-      title: "BE",
+      id: "avg",
+      price: px(P.entry),
+      color: posColor,
+      title: "",
       style: "solid",
       axisLabel: true,
-      label: `${P.side > 0 ? "多" : "空"} ${P.lev}x · BE · ${sgnU(uPnl(round, priceNow(round)))}`,
+      label: `${P.side > 0 ? "L" : "S"} ${P.lev}x · ${sgnU(uPnl(round, now))} · ${uFmt(notional, 0)}`,
     });
     const lq = liqPrice(round);
     // No axis label — far liq stacks / vanishes; chart hides off-range and shows an edge note.

@@ -787,7 +787,7 @@ export function KlineChart({
         if (l.price < lo - pad || l.price > hi + pad) continue;
       }
       let showAxis = l.axisLabel === true;
-      if (showAxis && l.id === "be" && lastClose != null && lastClose > 0) {
+      if (showAxis && (l.id === "avg" || l.id === "be") && lastClose != null && lastClose > 0) {
         if (Math.abs(l.price - lastClose) / lastClose < 0.003) showAxis = false;
       }
       a.lines.push(

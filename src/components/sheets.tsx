@@ -257,7 +257,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
         <span>盈亏平衡线</span>
         <Switch checked={beLine} onCheckedChange={setBeLine} aria-label="盈亏平衡线" />
       </Label>
-      <p className="hint">有仓时用盈亏平衡价替换均价线（含开仓手续费与预估平仓手续费）。关掉立刻摘线，打开立刻挂上，不用等下一局。</p>
+      <p className="hint">有仓时另画灰色盈亏平衡线（均价 + 开仓费 + 预估平仓费）；持仓均价线始终保留。关掉立刻摘 BE，打开立刻挂上，不用等下一局。</p>
       <h3 className="sheet-h">固定规则</h3>
       <div className="cfg-fixed">
         <div><span>初始本金</span><b>10,000 U，一直滚动；爆仓或手动重置才回到 1 万</b></div>
