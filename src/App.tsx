@@ -11,12 +11,16 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function App() {
   useEffect(() => {
+    // iOS Safari: unlock must ride a real gesture; once:true + rejected play() left audio dead forever.
+    const opts: AddEventListenerOptions = { capture: true };
     const unlock = () => unlockFillSound();
-    window.addEventListener("pointerdown", unlock, { once: true });
-    window.addEventListener("keydown", unlock, { once: true });
+    window.addEventListener("pointerdown", unlock, opts);
+    window.addEventListener("touchend", unlock, opts);
+    window.addEventListener("keydown", unlock, opts);
     return () => {
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("pointerdown", unlock, opts);
+      window.removeEventListener("touchend", unlock, opts);
+      window.removeEventListener("keydown", unlock, opts);
     };
   }, []);
 
