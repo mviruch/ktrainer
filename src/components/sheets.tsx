@@ -203,7 +203,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
     <DialogContent>
       <DialogHeader>
         <DialogTitle>设置</DialogTitle>
-        <DialogDescription>交易对和周期从下一局开始生效。勾上的周期会同时出现在一局里，播放和撮合走最短的那档。</DialogDescription>
+        <DialogDescription>交易对和周期下一局生效；涨跌配色、成交音效、盈亏平衡线保存后立刻生效。勾上的周期会同时出现在一局里，播放和撮合走最短的那档。</DialogDescription>
       </DialogHeader>
       <h3 className="sheet-h">交易对</h3>
       <div className="cfg-chips">
@@ -257,7 +257,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
         <span>盈亏平衡线</span>
         <Switch checked={beLine} onCheckedChange={setBeLine} aria-label="盈亏平衡线" />
       </Label>
-      <p className="hint">有仓时用盈亏平衡价替换均价线（含开仓手续费与预估平仓手续费）。关掉则整条不画。</p>
+      <p className="hint">有仓时用盈亏平衡价替换均价线（含开仓手续费与预估平仓手续费）。关掉立刻摘线，打开立刻挂上，不用等下一局。</p>
       <h3 className="sheet-h">固定规则</h3>
       <div className="cfg-fixed">
         <div><span>初始本金</span><b>10,000 U，一直滚动；爆仓或手动重置才回到 1 万</b></div>

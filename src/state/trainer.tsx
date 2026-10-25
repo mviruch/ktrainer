@@ -718,7 +718,9 @@ function createApi(box: { current: Box }, bump: () => void) {
     saveConfig(c: Config) {
       box.current.cfg = c;
       writeCfg(c);
-      toastMsg("已保存，下一局生效");
+      // pool/intervals 开新局才用；配色 / 成交音 / BE 线读当前 cfg，当局立刻生效。
+      bump();
+      toastMsg("已保存。交易对和周期下一局生效");
     },
     resetWallet() {
       const t = box.current.round;
