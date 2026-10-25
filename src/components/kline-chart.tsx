@@ -259,6 +259,8 @@ export function KlineChart({
   const countRef = useRef(0);
   const ignore = useRef(false);
   const priceDrag = useRef(false);
+  /** User manually scaled the price axis; survive pointerup so live bars don't force autoScale. */
+  const priceUserScaled = useRef(false);
   const prev = useRef({ session: -1, peek: -1, cursor: -1, view: "", blind: null as boolean | null });
   const paneModesRef = useRef(paneModes);
   paneModesRef.current = paneModes;
@@ -308,7 +310,7 @@ export function KlineChart({
         if (y0 != null && y >= 8 && y <= plotH - 8) {
           // Position tag wins: if the entry tag (avg) or last-price tag overlaps, nudge liq by half a tag height (9px).
           const TAG = 18;
-          const others = [m.lines.find((l) => l.id === "avg")?.price, lastLive(m)]
+          const others = [m.lines.find((l) => l.id === "be")?.price, lastLive(m)]
             .filter((v): v is number => v != null)
             .map((v) => a.bars.priceToCoordinate(v))
             .filter((v): v is NonNullable<typeof v> => v != null);
@@ -513,6 +515,7 @@ export function KlineChart({
       const scaleW = Math.max(bars.priceScale().width(), 48);
       if (ev.clientX >= rect.right - scaleW) {
         priceDrag.current = true;
+        priceUserScaled.current = true;
         return;
       }
       if (toolRef.current !== "cursor" || selectedRef.current == null) return;
@@ -546,6 +549,14 @@ export function KlineChart({
     const onPointerUp = () => {
       if (priceDrag.current) requestAnimationFrame(refreshLiqEdge);
       priceDrag.current = false;
+      // Vert touch-drag / axis drag turns autoScale off; remember so the next bar won't snap it back.
+      try {
+        if (api.current && api.current.bars.priceScale().options().autoScale === false) {
+          priceUserScaled.current = true;
+        }
+      } catch {
+        /* ignore */
+      }
       if (dragRef.current) {
         dragRef.current = null;
         chart.applyOptions({ handleScroll: true, handleScale: true });
@@ -596,7 +607,8 @@ export function KlineChart({
       const ratio = Math.min(1, Math.max(0, (anchor - range.from) / span));
       const newSpan = span * factor;
       scale.setVisibleRange({ from: anchor - newSpan * ratio, to: anchor + newSpan * (1 - ratio) });
-      priceDrag.current = true; // treat as manual scale so live follow won't force autoScale
+      priceDrag.current = true;
+      priceUserScaled.current = true; // persist past pointerup; live bars must not autoScale away
       requestAnimationFrame(refreshLiqEdge);
     };
     el.addEventListener("wheel", onWheel, { passive: false, capture: true });
@@ -682,6 +694,12 @@ export function KlineChart({
         timeFormatter: (time: Time) => (data.blind && t0 != null ? fmtRelFull(time, t0) : data.blind ? "" : fmtAxis(time)),
       },
     });
+    // Preserve user time-zoom across live setData (library may otherwise reset the window).
+    const keepRange =
+      prev.current.session === sessionKey &&
+      prev.current.view === viewKey &&
+      prev.current.session >= 0;
+    const rangeBefore = keepRange ? a.chart.timeScale().getVisibleLogicalRange() : null;
     a.bars.setData(
       data.candles.map((c) => {
         const body = c.close >= c.open ? up : down;
@@ -728,6 +746,14 @@ export function KlineChart({
     // Now line at live cursor candle (peek divider / current bar). Hide once fully settled with no fade.
     const hasFade = data.candles.some((c) => c.faded);
     a.now.sync(data.live || hasFade ? data.nowTime : null);
+    if (rangeBefore && !pin.current) {
+      // User scrolled away from the right edge — keep their window; do not jump on each new bar.
+      ignore.current = true;
+      a.chart.timeScale().setVisibleLogicalRange(rangeBefore);
+      requestAnimationFrame(() => {
+        ignore.current = false;
+      });
+    }
     for (const line of a.lines) a.bars.removePriceLine(line);
     let hi = -Infinity;
     let lo = Infinity;
@@ -761,7 +787,7 @@ export function KlineChart({
         if (l.price < lo - pad || l.price > hi + pad) continue;
       }
       let showAxis = l.axisLabel === true;
-      if (showAxis && l.id === "avg" && lastClose != null && lastClose > 0) {
+      if (showAxis && l.id === "be" && lastClose != null && lastClose > 0) {
         if (Math.abs(l.price - lastClose) / lastClose < 0.003) showAxis = false;
       }
       a.lines.push(
@@ -771,6 +797,8 @@ export function KlineChart({
           lineWidth: 1,
           lineStyle: lineStyle[l.style],
           axisLabelVisible: showAxis,
+          axisLabelColor: l.color,
+          axisLabelTextColor: "#131722",
           title: l.title,
         }),
       );
@@ -807,6 +835,7 @@ export function KlineChart({
     if (sessionChanged) {
       pin.current = true;
       viewBars.current = 140;
+      priceUserScaled.current = false;
     }
     if (viewChanged) pin.current = true;
     if (peekChanged) {
@@ -834,9 +863,16 @@ export function KlineChart({
     }
     // Blind↔real (or new round / peek / view): prices jump scale; force autoscale so candles stay visible.
     if (sessionChanged || peekChanged || viewChanged || blindChanged || prev.current.session < 0) {
+      priceUserScaled.current = false;
       resetPriceScale(a.bars);
-    } else if (data.live && pin.current && cursorAdvanced && !priceDrag.current) {
-      // Keep last bar in view after a price-axis drag unlocked autoScale.
+    } else if (
+      data.live &&
+      pin.current &&
+      cursorAdvanced &&
+      !priceDrag.current &&
+      !priceUserScaled.current
+    ) {
+      // Only re-enable autoScale when the user has not manually scaled the price axis.
       a.bars.priceScale().setAutoScale(true);
     }
     // 新柱由图表自己平移，柱宽不动。这里重设范围会按宽度重算柱宽，看起来像整图在缩放。
@@ -927,6 +963,7 @@ export function KlineChart({
       if (!a) return;
       pin.current = true;
       viewBars.current = Math.max(countRef.current, 40);
+      priceUserScaled.current = false;
       a.chart.timeScale().fitContent();
       resetPriceScale(a.bars);
     });
