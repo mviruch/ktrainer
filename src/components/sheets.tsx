@@ -198,6 +198,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
   const [ivs, setIvs] = useState(t.cfg.intervals.split(","));
   const [green, setGreen] = useState(t.cfg.greenUp);
   const [fillSound, setFillSound] = useState(t.cfg.fillSound !== false);
+  const [beLine, setBeLine] = useState(t.cfg.beLine !== false);
   return (
     <DialogContent>
       <DialogHeader>
@@ -251,6 +252,12 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
         <Switch checked={fillSound} onCheckedChange={setFillSound} aria-label="成交音效" />
       </Label>
       <p className="hint">下单、平仓、止盈止损、强平等成交时播放短音效。手机浏览器需先点一下页面才能出声。</p>
+      <h3 className="sheet-h">图表</h3>
+      <Label className="flex items-center justify-between gap-3 text-[13px]">
+        <span>盈亏平衡线</span>
+        <Switch checked={beLine} onCheckedChange={setBeLine} aria-label="盈亏平衡线" />
+      </Label>
+      <p className="hint">有仓时用盈亏平衡价替换均价线（含开仓手续费与预估平仓手续费）。关掉则整条不画。</p>
       <h3 className="sheet-h">固定规则</h3>
       <div className="cfg-fixed">
         <div><span>初始本金</span><b>10,000 U，一直滚动；爆仓或手动重置才回到 1 万</b></div>
@@ -280,7 +287,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               t.toastMsg("至少留一个周期", 2500);
               return;
             }
-            t.saveConfig({ pool, intervals: ivs.join(","), greenUp: green, fillSound });
+            t.saveConfig({ pool, intervals: ivs.join(","), greenUp: green, fillSound, beLine });
             onClose();
           }}
         >

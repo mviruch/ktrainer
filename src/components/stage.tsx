@@ -240,6 +240,7 @@ export function Stage() {
   }, [pending, tool, selectedId, t]);
   const peekEnd = t.peekEnd;
   const greenUp = t.cfg.greenUp;
+  const beLine = t.cfg.beLine !== false;
   const sig = round
     ? [
         round.startedAt,
@@ -254,6 +255,7 @@ export function Stage() {
         round.pos ? `${round.pos.qty}:${round.pos.entry}:${round.pos.tp}:${round.pos.sl}:${round.pos.margin}` : "",
         peekEnd ?? 0,
         greenUp ? 1 : 0,
+        beLine ? 1 : 0,
       ].join("|")
     : "";
   const indKey = inds.map((s) => `${s.id}:${s.kind}:${JSON.stringify(s.params)}:${JSON.stringify(s.style ?? null)}`).join("|");
@@ -286,7 +288,7 @@ export function Stage() {
     return { id: 0, kind: tool, a: pending.a, b: hover };
   })();
   const model = useMemo(
-    () => (round ? buildChartModel(round, peekEnd, greenUp) : null),
+    () => (round ? buildChartModel(round, peekEnd, greenUp, beLine) : null),
     // round 就地改。sig 才是「数据变了」的信号，不能拿掉。
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sig],

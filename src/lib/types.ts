@@ -226,6 +226,8 @@ export type Config = {
   greenUp: boolean;
   /** 成交音效；缺省为开 */
   fillSound?: boolean;
+  /** 盈亏平衡线（替换均价线）；缺省为开 */
+  beLine?: boolean;
 };
 
 export type Account = {

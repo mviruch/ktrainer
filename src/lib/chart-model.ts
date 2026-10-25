@@ -1,6 +1,6 @@
 import { CANDLE_DOWN, CANDLE_UP } from "./constants";
-import { liqPrice, priceNow, uPnl } from "./engine";
-import { blindBaseOf, displayPrice, fmtNum, sgnU, uFmt } from "./format";
+import { breakEvenPrice, liqPrice, priceNow, uPnl } from "./engine";
+import { blindBaseOf, displayPrice, sgnU, uFmt } from "./format";
 import { bucketOpen, chartSlice } from "./frames";
 import { IV_MS } from "./constants";
 import type { Round, Side } from "./types";
@@ -60,7 +60,7 @@ export function sessionZero(round: Pick<Round, "bars" | "ctx">): number | null {
   return b ? Math.floor(b.t / 1000) : null;
 }
 
-export function buildChartModel(round: Round, peekEnd: number | null, greenUp: boolean): ChartModel {
+export function buildChartModel(round: Round, peekEnd: number | null, greenUp: boolean, beLine = true): ChartModel {
   const up = greenUp ? UP : DOWN;
   const down = greenUp ? DOWN : UP;
   const blind = !round.revealed;
@@ -97,16 +97,18 @@ export function buildChartModel(round: Round, peekEnd: number | null, greenUp: b
   }
   const px = (p: number) => displayPrice(p, base);
   const lines: LinePoint[] = [];
-  if (!round.done && round.pos) {
+  if (!round.done && round.pos && beLine) {
     const P = round.pos;
+    // BE replaces the avg/entry line (not drawn alongside). Net-zero after open + est. close fees.
+    const be = breakEvenPrice(round) ?? P.entry;
     lines.push({
-      id: "avg",
-      price: px(P.entry),
+      id: "be",
+      price: px(be),
       color: P.side > 0 ? up : down,
-      title: "",
+      title: "BE",
       style: "solid",
       axisLabel: true,
-      label: `${P.side > 0 ? "多" : "空"} ${P.lev}x · 均价 ${fmtNum(px(P.entry), blind)} · ${sgnU(uPnl(round, priceNow(round)))}`,
+      label: `${P.side > 0 ? "多" : "空"} ${P.lev}x · BE · ${sgnU(uPnl(round, priceNow(round)))}`,
     });
     const lq = liqPrice(round);
     // No axis label — far liq stacks / vanishes; chart hides off-range and shows an edge note.

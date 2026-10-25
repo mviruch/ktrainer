@@ -141,6 +141,43 @@ export function liqPrice(t: Round) {
   return lp > 0 && Number.isFinite(lp) ? lp : null;
 }
 
+/**
+ * True zero-net price: side*qty*(p-entry) - openFee - qty*p*FEE_TAKER = 0.
+ * openFee = attributed open/add fees for remaining size (else entry*FEE_TAKER*qty).
+ * Long: p = (entry + openFee/qty) / (1 - f); short: p = (entry - openFee/qty) / (1 + f).
+ */
+export function breakEvenPrice(t: Round) {
+  const P = t.pos;
+  if (!P || !(P.qty > 0)) return null;
+  const f = FEE_TAKER;
+  const q = P.qty;
+  const e = P.entry;
+  let openedQty = 0;
+  let openedFee = 0;
+  const pid = P.pid;
+  if (pid != null) {
+    for (const fill of t.fills) {
+      if (fill.openPosId === pid) {
+        // Opening leg. Reverse fills also close another pos; open size is qty0 on the new stat.
+        const st = statOf(t, pid);
+        const legQ =
+          fill.posId != null && fill.posId !== pid
+            ? Math.min(fill.qty, st?.qty0 && st.qty0 > 0 ? st.qty0 : fill.qty)
+            : fill.qty;
+        if (!(legQ > 0) || !(fill.qty > 0)) continue;
+        openedQty += legQ;
+        openedFee += fill.fee * (legQ / fill.qty);
+      } else if (fill.posId === pid && fill.side === P.side && !fill.reason) {
+        openedQty += fill.qty;
+        openedFee += fill.fee;
+      }
+    }
+  }
+  const openFee = openedQty > 1e-12 ? openedFee * (q / openedQty) : q * e * f;
+  const be = P.side > 0 ? (e + openFee / q) / (1 - f) : (e - openFee / q) / (1 + f);
+  return be > 0 && Number.isFinite(be) ? be : null;
+}
+
 function closableQty(t: Round, side: Side, exceptId?: number | "now") {
   const P = t.pos;
   if (!P || P.side === side) return 0;
